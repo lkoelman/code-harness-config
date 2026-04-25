@@ -1,17 +1,17 @@
 ---
-name: architecture-doc-generator
+name: document-architecture
 description: Generate comprehensive architecture documents (ARCHITECTURE.md) for an existing codebase. Use this skill when a user wants to document system architecture, create an ARCHITECTURE.md, or explain how different components of a project interact. The resulting document is optimized as an entry point for new human developers and AI coding agents.
 ---
 
-# Architecture Document Generator Skill
+# Document Architecture Skill
 
-This skill guides Codex through a structured workflow to analyze an existing codebase and generate a complete, highly readable `ARCHITECTURE.md` file. The goal is to provide a robust onboarding document that covers system components, responsibilities, interactions, interfaces, protocols, constraints, and operational context.
+This skill guides the agent through a structured workflow to analyze an existing codebase and generate a complete, highly readable `ARCHITECTURE.md` file. The goal is to provide a robust onboarding document that covers system components, responsibilities, interactions, interfaces, protocols, constraints, and operational context.
 
 ## When to Use This Workflow
 
 **Trigger conditions:**
 * User asks to "write an ARCHITECTURE.md" or "document the architecture."
-* User needs a high-level overview of how a codebase's components interact.
+* User needs a high-level overview of how a codebase's components interact (questions covering entire codebase, not specific components).
 * User wants to map out internal/external interfaces and data flows of an existing project.
 * User is onboarding an AI coding agent to a new repository and needs a context document.
 
