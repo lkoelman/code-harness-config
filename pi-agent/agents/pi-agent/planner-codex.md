@@ -6,8 +6,6 @@ thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-defaultReads: context.md
-defaultContext: fork
 ---
 
 # Plan Mode (Conversational)

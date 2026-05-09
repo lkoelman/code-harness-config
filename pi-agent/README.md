@@ -18,7 +18,11 @@ The bundled [settings.json](settings.json) configures pi-agent to use skills fro
 
 # Agent Definitions
 
-Agent definitions for the [pi-subagents package](https://pi.dev/packages/pi-subagents). Agents definitions must conform to markdown format in https://github.com/nicobailon/pi-subagents/tree/main/agents
+Agent definitions for the [pi-subagents package](https://pi.dev/packages/pi-subagents).
+
+Syntax:
+- Agents definitions must conform to markdown format in https://github.com/nicobailon/pi-subagents/tree/main/agents
+- [YAML Frontmatter](https://github.com/nicobailon/pi-subagents#agent-frontmatter)
 
 Useful sources for agent definitions:
 - [Codex CLI Plan Mode](https://github.com/openai/codex/blob/main/codex-rs/collaboration-mode-templates/templates/plan.md)
