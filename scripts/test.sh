@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Tests for scripts/build.sh, install.sh, uninstall.sh.
+# Tests for scripts/build.sh, install.sh, uninstall.sh, and the scripts bundled
+# with the autofix-pr-local skill.
 # Each test runs against a throwaway sandbox copy of the scripts plus
 # fixture skills/agents/harnesses, so nothing here touches the real
-# skills/ or agents/ tree or the real $HOME.
+# skills/ or agents/ tree or the real $HOME. The skill-script tests add a
+# throwaway git repo and a mock `gh` on $PATH, so they never hit the network.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -376,6 +378,194 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Sandbox for the scripts bundled with the autofix-pr-local skill: a throwaway
+# git repo (they keep state in the git dir) plus a mock `gh` on $PATH that
+# answers from fixture files, so no test touches the network or a real PR.
+new_gh_sandbox() {
+  local d
+  d="$(mktemp -d)"
+  SANDBOXES+=("$d")
+  mkdir -p "$d/bin" "$d/fixtures" "$d/repo"
+  git -C "$d/repo" init -q
+  git -C "$d/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+
+  cat >"$d/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+# Mock gh. Answers from $FIXTURES; touch $FIXTURES/down to simulate an outage.
+[ -f "$FIXTURES/down" ] && exit 1
+args="$*"
+case "$args" in
+  *"-q .nameWithOwner"*) echo "owner/repo" ;;
+  *"pr-review --help"*) [ -f "$FIXTURES/no-pr-review" ] && exit 1; echo "usage: gh pr-review" ;;
+  *"pr-review review view"*) cat "$FIXTURES/threads.json" ;;
+  *"-q .state"*) jq -r .state "$FIXTURES/view.json" ;;
+  *"pr checks"*) cat "$FIXTURES/checks.json"; jq -e 'any(.bucket == "fail")' "$FIXTURES/checks.json" >/dev/null && exit 1 || exit 0 ;;
+  *"pr view"*) cat "$FIXTURES/view.json" ;;
+  *"api repos/"*) cat "$FIXTURES/comments.json" ;;
+  *"auth status"*) echo "logged in" ;;
+  *) echo "mock gh: unhandled '$args'" >&2; exit 1 ;;
+esac
+EOF
+  chmod +x "$d/bin/gh"
+  echo "$d"
+}
+
+test_pr_state_lifecycle() {
+  local name="skill autofix-pr-local: pr-state.sh tracks attempts, signatures, threads"
+  local d; d="$(new_gh_sandbox)"
+  local st="$REPO/skills/autofix-pr-local/scripts/pr-state.sh"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  "$st" init --pr 7 --max-attempts 2 --mode fix-local >/dev/null || { fail "$name (init failed)"; return; }
+  [ -f "$d/repo/.git/autofix-pr-local/state.json" ] || { fail "$name (no state file)"; return; }
+
+  # init is missing a required flag -> refuse
+  if "$st" init --pr 7 --mode fix-local >/dev/null 2>&1; then
+    fail "$name (init accepted a missing --max-attempts)"; return
+  fi
+
+  "$st" attempt >/dev/null || { fail "$name (attempt 1 rejected)"; return; }
+  "$st" attempt >/dev/null || { fail "$name (attempt 2 rejected)"; return; }
+  if "$st" attempt >/dev/null 2>&1; then
+    fail "$name (attempt 3 should exhaust the budget)"; return
+  fi
+
+  # A new signature is progress; the same one again is not (exit 3).
+  "$st" signature build "step=test: assertion failed" >/dev/null || { fail "$name (first signature rejected)"; return; }
+  "$st" signature build "step=test: something else" >/dev/null || { fail "$name (changed signature rejected)"; return; }
+  "$st" signature build "step=test: something else" >/dev/null 2>&1
+  if [ "$?" -ne 3 ]; then
+    fail "$name (repeated signature should exit 3)"; return
+  fi
+  jq -e '.stalled_checks | index("build")' "$d/repo/.git/autofix-pr-local/state.json" >/dev/null \
+    || { fail "$name (repeated signature should mark the check stalled)"; return; }
+
+  if "$st" thread-seen T1 >/dev/null 2>&1; then
+    fail "$name (unknown thread reported as handled)"; return
+  fi
+  "$st" thread-done T1 >/dev/null
+  "$st" thread-done T1 >/dev/null   # idempotent
+  "$st" thread-seen T1 >/dev/null || { fail "$name (handled thread not remembered)"; return; }
+  [ "$(jq -r '.handled_threads | length' "$d/repo/.git/autofix-pr-local/state.json")" = "1" ] \
+    || { fail "$name (thread-done should de-duplicate)"; return; }
+
+  "$st" commit abc123 "fix build" >/dev/null
+  [ "$(jq -r '.commits[0].sha' "$d/repo/.git/autofix-pr-local/state.json")" = "abc123" ] \
+    || { fail "$name (commit not recorded)"; return; }
+
+  # Re-init on the same PR resumes rather than resetting the tally.
+  "$st" init --pr 7 --max-attempts 5 --mode fix-push >/dev/null
+  [ "$(jq -r '.attempts_used' "$d/repo/.git/autofix-pr-local/state.json")" = "2" ] \
+    || { fail "$name (re-init on same PR should keep attempts_used)"; return; }
+  # A different PR starts clean.
+  "$st" init --pr 8 --max-attempts 5 --mode fix-push >/dev/null
+  [ "$(jq -r '.attempts_used' "$d/repo/.git/autofix-pr-local/state.json")" = "0" ] \
+    || { fail "$name (new PR should reset attempts_used)"; return; }
+
+  cd "$REPO" || true
+  pass "$name"
+}
+
+test_poll_pr_reports_only_changes() {
+  local name="skill autofix-pr-local: poll-pr.sh reports deltas and ignores API outages"
+  local d; d="$(new_gh_sandbox)"
+  local poll="$REPO/skills/autofix-pr-local/scripts/poll-pr.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  echo '[{"name":"build","bucket":"pending"},{"name":"lint","bucket":"pass"}]' >"$FIXTURES/checks.json"
+  echo '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviews":[],"comments":[]}' >"$FIXTURES/view.json"
+
+  local out
+  out="$(PATH="$d/bin:$PATH" "$poll" --pr 1 --once)"
+  grep -q "check lint: pass" <<<"$out" || { fail "$name (first tick should report current state)"; return; }
+  grep -q "check build" <<<"$out" && { fail "$name (pending check should not be reported)"; return; }
+
+  out="$(PATH="$d/bin:$PATH" "$poll" --pr 1 --once)"
+  [ -z "$out" ] || { fail "$name (unchanged state should be silent, got: $out)"; return; }
+
+  # An API outage is not an event, and must not corrupt the snapshot.
+  touch "$FIXTURES/down"
+  out="$(PATH="$d/bin:$PATH" "$poll" --pr 1 --once)"
+  [ -z "$out" ] || { fail "$name (outage should be silent, got: $out)"; return; }
+  rm "$FIXTURES/down"
+  out="$(PATH="$d/bin:$PATH" "$poll" --pr 1 --once)"
+  [ -z "$out" ] || { fail "$name (snapshot corrupted by outage, got: $out)"; return; }
+
+  # A failing check and a new comment are each one line, and only once.
+  echo '[{"name":"build","bucket":"fail"},{"name":"lint","bucket":"pass"}]' >"$FIXTURES/checks.json"
+  echo '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviews":[],"comments":[{"id":1}]}' >"$FIXTURES/view.json"
+  out="$(PATH="$d/bin:$PATH" "$poll" --pr 1 --once)"
+  grep -q "check build: fail" <<<"$out" || { fail "$name (failure not reported)"; return; }
+  grep -q "comments: 1" <<<"$out" || { fail "$name (new comment not reported)"; return; }
+  grep -q "check lint" <<<"$out" && { fail "$name (unchanged check re-reported)"; return; }
+
+  # A closed PR is a terminal event, so the unbounded loop must exit on its own.
+  echo '{"state":"CLOSED","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviews":[],"comments":[]}' >"$FIXTURES/view.json"
+  if ! PATH="$d/bin:$PATH" timeout 20 "$poll" --pr 1 --interval 1 >/dev/null 2>&1; then
+    fail "$name (loop should exit when the PR closes)"; return
+  fi
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
+test_pr_signals_shape() {
+  local name="skill autofix-pr-local: pr-signals.sh normalises checks, threads and bots"
+  local d; d="$(new_gh_sandbox)"
+  local sig="$REPO/skills/autofix-pr-local/scripts/pr-signals.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  cat >"$FIXTURES/checks.json" <<'EOF'
+[{"name":"build","bucket":"fail","link":"https://github.com/owner/repo/actions/runs/4242/job/9","workflow":"CI"},
+ {"name":"deploy","bucket":"pending","link":"https://github.com/owner/repo/actions/runs/4243/job/1","workflow":"CI"},
+ {"name":"circleci","bucket":"fail","link":"https://circleci.com/gh/owner/repo/77","workflow":null}]
+EOF
+  cat >"$FIXTURES/view.json" <<'EOF'
+{"number":12,"state":"OPEN","baseRefName":"main","headRefName":"feat","url":"https://github.com/owner/repo/pull/12",
+ "isDraft":false,"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","reviews":[],"comments":[]}
+EOF
+  cat >"$FIXTURES/comments.json" <<'EOF'
+[{"id":1,"user":{"login":"coderabbitai[bot]","type":"Bot"},"path":"a.py","body":"nit"},
+ {"id":2,"user":{"login":"alice","type":"User"},"path":"b.py","body":"please rename"}]
+EOF
+  cat >"$FIXTURES/threads.json" <<'EOF'
+{"reviews":[{"comments":[
+  {"thread_id":"T1","path":"a.py","line":3,"author":"coderabbitai[bot]","body":"nit","is_resolved":false},
+  {"thread_id":"T2","path":"b.py","line":9,"author":"alice","body":"please rename","is_resolved":false},
+  {"thread_id":"T3","path":"c.py","line":1,"author":"alice","body":"done","is_resolved":true}
+]}]}
+EOF
+
+  local out
+  out="$(PATH="$d/bin:$PATH" "$sig" --pr 12)" || { fail "$name (pr-signals.sh exited nonzero)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (output is not JSON)"; return; }
+
+  local check
+  check="$(jq -r '[.needsBaseSync, (.counts.failing|tostring), (.counts.unresolvedThreads|tostring),
+                   (.counts.botThreads|tostring), (.counts.humanThreads|tostring),
+                   (.failingChecks[0].runId|tostring), (.checks[2].isActions|tostring),
+                   (.havePrReview|tostring)] | join(",")' <<<"$out")"
+  if [ "$check" != "true,2,2,1,1,4242,false,true" ]; then
+    fail "$name (unexpected shape: $check)"; return
+  fi
+  jq -e '.reviewComments | map(select(.isBot)) | length == 1' >/dev/null <<<"$out" \
+    || { fail "$name (bot classification of review comments wrong)"; return; }
+
+  # Without the extension, threads are empty but everything else still works.
+  touch "$FIXTURES/no-pr-review"
+  out="$(PATH="$d/bin:$PATH" "$sig" --pr 12)" || { fail "$name (failed without gh-pr-review)"; return; }
+  check="$(jq -r '[(.havePrReview|tostring), (.counts.unresolvedThreads|tostring), (.counts.failing|tostring)] | join(",")' <<<"$out")"
+  [ "$check" = "false,0,2" ] || { fail "$name (degraded mode wrong: $check)"; return; }
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
 test_splice_and_passthrough
 test_harnesses_targeting
 test_variant_headers
@@ -385,6 +575,9 @@ test_lint_missing_header_for_targeted_harness
 test_install_uninstall_idempotent
 test_install_guardrail_and_force
 test_install_dry_run
+test_pr_state_lifecycle
+test_poll_pr_reports_only_changes
+test_pr_signals_shape
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

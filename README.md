@@ -13,7 +13,7 @@ scripts/install-prerequisites.sh     # installs gh, jq and the gh extensions the
 scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
 scripts/install.sh                   # builds, then symlinks into each harness's config dir
 scripts/uninstall.sh                 # removes symlinks this repo created
-scripts/test.sh                      # tests for build.sh/install.sh/uninstall.sh
+scripts/test.sh                      # tests for the scripts above and for bundled skill scripts
 build/                               # generated output (gitignored)
 ```
 
@@ -94,6 +94,7 @@ Uninstall only ever removes symlinks that resolve back into this repo; it never 
 ## Development
 
 ```bash
-./scripts/test.sh    # exercises build.sh/install.sh/uninstall.sh against throwaway fixtures
+./scripts/test.sh    # exercises build.sh/install.sh/uninstall.sh against throwaway fixtures,
+                     # plus the autofix-pr-local scripts against a mock `gh`
 ./scripts/build.sh    # build without installing, e.g. to inspect build/<harness>/...
 ```
