@@ -1,0 +1,7 @@
+mode: primary
+model: openrouter/google/gemini-3-flash-preview
+plugins:
+  - id: web
+reasoning:
+  enabled: true
+  effort: high

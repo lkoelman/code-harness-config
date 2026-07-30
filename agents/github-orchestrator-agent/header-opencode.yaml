@@ -1,0 +1,18 @@
+mode: primary
+tools:
+  websearch: false
+  webfetch: false
+  write: true
+  edit: true
+  bash: true
+permission:
+  edit: allow
+  bash:
+    "*": deny
+    "pwd": allow
+    "ls *": allow
+    "find *": allow
+    "grep *": allow
+    "cat *": allow
+    "git status": allow
+    "gh *": allow

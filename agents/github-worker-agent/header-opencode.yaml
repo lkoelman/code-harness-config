@@ -1,0 +1,26 @@
+mode: primary
+tools:
+  websearch: false
+  webfetch: false
+  write: true
+  edit: true
+  bash: true
+permission:
+  edit: allow
+  bash:
+    "*": deny
+    "pwd": allow
+    "ls *": allow
+    "find *": allow
+    "grep *": allow
+    "cat *": allow
+    "git status": allow
+    "git branch": allow
+    "git checkout *": allow
+    "git switch *": allow
+    "git add *": allow
+    "git commit *": allow
+    "git diff *": allow
+    "git log *": allow
+    "gh *": allow
+    "bun *": allow

@@ -1,206 +1,87 @@
 # Code Harness Config
 
-Configuration and tooling for code harnesses
+Skills and agent definitions shared across coding agent harnesses (Claude Code, Codex CLI, Gemini CLI, OpenCode, pi-agent), maintained once and installed per harness.
 
-## Contents
+## Layout
 
-- **OpenCode Configuration**: Custom agents and skills for OpenCode
-- **Gemini CLI Configuration**: Custom agents and skills for Gemini CLI
+```
+skills/<name>/SKILL.md               # one skill, shared across every harness
+agents/<name>/AGENT.md               # one agent definition, shared across every harness
+harnesses/<harness>.conf             # where each harness's skills/agents/settings live
+harnesses/pi-agent/settings.json     # pi-agent's settings.json, symlinked in on install
+scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
+scripts/install.sh                   # builds, then symlinks into each harness's config dir
+scripts/uninstall.sh                 # removes symlinks this repo created
+scripts/test.sh                      # tests for build.sh/install.sh/uninstall.sh
+build/                               # generated output (gitignored)
+```
 
----
-
-# OpenCode Configuration
-
-This repository provides custom agents and skills for OpenCode. Installation is managed using [GNU Stow](https://www.gnu.org/software/stow/), which creates symlinks from `~/.opencode/` to this repository.
+A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`description`) and the body. Where a harness needs extra frontmatter it can't share with the others — tool permissions, `mode:`, `model:`, pi-agent's `thinking:`/`systemPromptMode:`, etc. — that goes in a sidecar `header-<harness>.yaml` next to it. At build time the two are spliced together; harnesses that need nothing extra just get the common frontmatter as-is.
 
 ## Prerequisites
 
-### 1. Install GNU Stow
+- [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `github-cli` skill and the GitHub-driven agents.
+- The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
 
-For example, on Debian/Ubuntu: `sudo apt-get install stow`.
+No other tooling is required — `build.sh`/`install.sh` are plain bash with no dependencies (no GNU Stow, no Node).
 
-### 2. Install GitHub CLI
-
-See the [official installation guide](https://github.com/cli/cli/blob/trunk/docs/install_linux.md).
-
-### 3. Install GitHub CLI Extension (for PR reviews)
+## Installing
 
 ```bash
-gh extension install agynio/gh-pr-review
+./scripts/install.sh --all
+# or install/update just one harness:
+./scripts/install.sh opencode
 ```
 
-## Installation
+This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks each skill and agent individually into the harness's config directory — unrelated files already there are left alone. Re-running is safe (idempotent) and picks up any changes after a `git pull`.
 
-### Option 1: Using the Installation Script (Recommended)
+| Harness | Skills | Agents | Notes |
+|---|---|---|---|
+| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. |
+| Codex CLI | `~/.codex/skills/<name>` | — | Codex doesn't support markdown subagent definitions. |
+| Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | Run `/skills reload` after installing/updating. |
+| OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | Native path, not `~/.opencode/`. |
+| pi-agent | `~/.pi/agent/skills/<name>` | `~/.pi/agent/agents/<name>.md` | Also symlinks `harnesses/pi-agent/settings.json` to `~/.pi/agent/settings.json`. |
+
+Flags:
+- `--dry-run` — print what would happen without touching `$HOME`.
+- `--force` — replace an existing real (non-symlink) file/dir at an install target; the original is backed up first (`<name>.bak`, or `settings.old.json` for pi-agent's settings file). Without `--force`, install refuses to clobber anything that isn't already one of its own symlinks.
+
+To remove everything this repo installed for a harness:
 
 ```bash
-./scripts/install-opencode-config.sh
+./scripts/uninstall.sh --all
+# or: ./scripts/uninstall.sh gemini-cli
 ```
 
-This script will:
-- Check if GNU Stow is installed
-- Detect and remove any existing manual symlinks (with confirmation)
-- Install the configuration using Stow
-- Verify the installation
+Uninstall only ever removes symlinks that resolve back into this repo; it never touches real files.
 
-### Option 2: Manual Installation with Stow
+## Adding or editing a skill
 
-```bash
-# From the repository root
-stow -v -R -t ~ opencode
-```
+1. Create `skills/<name>/SKILL.md` with:
+   ```yaml
+   ---
+   name: <name>              # must match the directory name
+   description: ...
+   ---
 
-Flags explained:
-- `-v`: Verbose output
-- `-R`: Restow (reinstall) - safe to use for updates
-- `-t ~`: Set target directory to home directory
-
-## Verifying Installation
-
-Check that the symlinks were created correctly:
-
-```bash
-ls -la ~/.opencode/
-```
-
-You should see:
-- `agents/` → symlink to this repository
-- `skills/` → symlink to this repository
-
-List installed agents and skills:
-
-```bash
-ls ~/.opencode/agents/
-ls ~/.opencode/skills/
-```
-
-## Updating
-
-To update after pulling new changes:
-
-```bash
-git pull
-./install-opencode-config.sh
-# or
-stow -v -R -t ~ opencode
-```
-
-The `-R` (restow) flag safely updates symlinks.
-
-## Uninstallation
-
-### Option 1: Using the Uninstallation Script
-
-```bash
-./scripts/uninstall-opencode-config.sh
-```
-
-This script will:
-- Remove all stow-managed symlinks
-- Optionally remove the entire `~/.opencode/` directory if empty
-
-### Option 2: Manual Uninstallation with Stow
-
-```bash
-stow -v -D -t ~ opencode
-```
-
-The `-D` flag removes symlinks.
-
-## Troubleshooting
-
-### Conflict with existing files
-
-If you have existing files in `~/.opencode/`, Stow will report conflicts and refuse to install. You have two options:
-
-1. **Backup and remove existing files:**
-   ```bash
-   mv ~/.opencode ~/.opencode.backup
-   ./install-opencode-config.sh
+   Body content.
    ```
+2. Optionally restrict which harnesses get it with `harnesses: [claude, codex]` (default: every harness with a skills directory).
+3. Any other files in the skill's directory (e.g. `references/`, scripts it uses) are copied through as-is; `header-*.yaml` files are not.
+4. Skills rarely need a header — most frontmatter fields harnesses currently support (`allowed-tools` etc.) aren't actually read by the target CLI, so don't add one unless a harness genuinely requires extra metadata.
 
-2. **Manually resolve conflicts** by removing or moving specific conflicting files.
+## Adding or editing an agent
 
-### Existing manual symlinks
+1. Create `agents/<name>/AGENT.md` with just `description:` and the body.
+2. For each harness that should get this agent, add `agents/<name>/header-<harness>.yaml` containing whatever that harness's frontmatter needs beyond `description` (e.g. `mode:`, `tools:`, `permission:` for OpenCode/Gemini CLI; `tools:`, `thinking:`, `systemPromptMode:` for pi-agent). **An agent only installs to harnesses that have a header file** — there's no implicit "install everywhere" default, since agent frontmatter is entirely harness-specific.
+3. For a second variant of the same body under a different name/config (e.g. a `primary` and a `subagent` mode of the same agent), add `header-<harness>.<variant>.yaml` — it builds as `<variant>.md` instead of `<name>.md`.
+4. A `harnesses: [...]` key in `AGENT.md` is optional; if present, `build.sh` verifies a header exists for every harness listed there, catching a stale/missing header early.
+5. `build.sh` also checks: `name:` in a skill's frontmatter must match its directory; a key must not be set in both the common frontmatter and a header for the same harness; and a header's own `name:` field (used by pi-agent) must match the file it will install as.
 
-If you previously installed using manual symlinks (e.g., `ln -s`), the installation script will detect them and offer to remove them. Alternatively, remove them manually:
-
-```bash
-rm ~/.opencode/agents ~/.opencode/skills
-./install-opencode-config.sh
-```
-
-### Stow reports "target is not owned by stow"
-
-This means there are existing files/directories that weren't created by Stow. Remove them as described above.
-
-### Check Stow dry-run
-
-To see what Stow would do without making changes:
+## Development
 
 ```bash
-stow -n -v -R -t ~ opencode
+./scripts/test.sh    # exercises build.sh/install.sh/uninstall.sh against throwaway fixtures
+./scripts/build.sh    # build without installing, e.g. to inspect build/<harness>/...
 ```
-
-The `-n` flag performs a dry-run.
-
-## What Gets Installed
-
-After installation, `~/.opencode/` will contain:
-
-- **agents/**: Custom OpenCode agent configurations
-  - `autoplan.md` - Plans code changes before execution
-  - `search-grounding.md` - Web search with grounded results
-  - `search-grounding-subagent.md` - Search agent for subagent use
-
-- **skills/**: Custom OpenCode skills
-  - `github-cli/` - GitHub CLI integration skill
-
-All files are symlinked to this repository, so updates are automatically reflected after pulling changes and restowing.
-
----
-
-# Gemini CLI Configuration
-
-This repository provides custom agents and skills for Gemini CLI. Installation is managed using [GNU Stow](https://www.gnu.org/software/stow/), which creates symlinks from `~/.gemini/` to this repository.
-
-## Installation
-
-### 1. Install GNU Stow
-
-If not already installed (see OpenCode Configuration above).
-
-### 2. Install Configuration with Stow
-
-```bash
-# From the repository root
-stow -v -R -t ~ gemini-cli
-```
-
-### 3. Verify Installation
-
-Check that the symlinks were created correctly:
-
-```bash
-ls -la ~/.gemini/agents/
-ls -la ~/.gemini/skills/
-```
-
-### 4. Reload Skills
-
-After installation, reload the skills in your interactive Gemini CLI session to enable them:
-
-```bash
-/skills reload
-```
-
-## What Gets Installed
-
-- **agents/**: Custom Gemini CLI agent configurations
-  - `autoplan.md` - Plans code changes before execution
-  - `plan-writer.md` - Writes plans for changes
-
-- **skills/**: Custom Gemini CLI skills
-  - `github-cli/` - GitHub CLI integration skill
-
-All files are symlinked to this repository.
