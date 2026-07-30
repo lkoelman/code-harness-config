@@ -9,6 +9,7 @@ skills/<name>/SKILL.md               # one skill, shared across every harness
 agents/<name>/AGENT.md               # one agent definition, shared across every harness
 harnesses/<harness>.conf             # where each harness's skills/agents/settings live
 harnesses/pi-agent/settings.json     # pi-agent's settings.json, symlinked in on install
+scripts/install-prerequisites.sh     # installs gh, jq and the gh extensions the skills need
 scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
 scripts/install.sh                   # builds, then symlinks into each harness's config dir
 scripts/uninstall.sh                 # removes symlinks this repo created
@@ -22,8 +23,19 @@ A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`descri
 
 - [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `github-cli` skill and the GitHub-driven agents.
 - The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
+- The [`gh-webhook`](https://github.com/cli/gh-webhook) extension, only if you want push-style GitHub event forwarding instead of polling: `gh extension install cli/gh-webhook`. Note it needs admin rights on the repo to register the webhook, plus a local HTTP receiver.
+- `jq` — used by the `github-cli` and `autofix-pr-local` skills to read structured `gh` output.
 
-No other tooling is required — `build.sh`/`install.sh` are plain bash with no dependencies (no GNU Stow, no Node).
+To install all of the above:
+
+```bash
+./scripts/install-prerequisites.sh              # add --dry-run to see what it would do
+./scripts/install-prerequisites.sh --skip-webhook
+```
+
+Each step checks first, so re-running is a no-op once everything is present. Installing `gh` or `jq` needs `sudo`; on an apt system with no `gh` candidate it adds the official `cli.github.com` repo first. Installing the extensions needs `gh auth login` to have been run.
+
+No other tooling is required for the build itself — `build.sh`/`install.sh` are plain bash with no dependencies (no GNU Stow, no Node).
 
 ## Installing
 
