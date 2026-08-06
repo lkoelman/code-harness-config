@@ -796,10 +796,11 @@ remoteHome	/home/remoteuser
 claudeVersion	2.1.222 (Claude Code)
 hasJq	yes
 hasRsync	yes
+hasGit	yes
 repoPath	/home/remoteuser/code/repo
 originMatches	yes
 headPresent	yes
-branchCheckedOut	no
+branchExists	no
 sessionLive	no
 agentForwardingOk	yes
 EOF
@@ -811,9 +812,10 @@ EOF
 
   local got
   got="$(jq -r '[.user, .hostname, .remoteHome, .claudeVersion, (.hasJq|tostring),
-                 .repoPath, (.originMatches|tostring), (.headPresent|tostring),
+                 (.hasGit|tostring), .repoPath, (.originMatches|tostring),
+                 (.headPresent|tostring), (.branchExists|tostring),
                  (.agentForwardingOk|tostring), .suggestedWorktreePath] | join("|")' <<<"$out")"
-  local want="remoteuser|10.0.0.9|/home/remoteuser|2.1.222|true|/home/remoteuser/code/repo|true|true|true|/home/remoteuser/code/worktrees-repo/main"
+  local want="remoteuser|10.0.0.9|/home/remoteuser|2.1.222|true|true|/home/remoteuser/code/repo|true|true|false|true|/home/remoteuser/code/worktrees-repo/main"
   if [ "$got" != "$want" ]; then
     fail "$name (probe wrong:
   got  $got
@@ -842,14 +844,19 @@ EOF
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
   [ "$?" -eq 3 ] || { fail "$name (a target without jq should exit 3)"; return; }
 
-  # --summary teleports never touch claude or jq on the target, so --require
-  # narrows what is mandatory: missing jq is fine, missing rsync still isn't.
-  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync >/dev/null 2>&1
-  [ "$?" -eq 0 ] || { fail "$name (--require rsync should ignore a missing jq)"; return; }
-  sed -i 's/^hasRsync\tyes/hasRsync\tno/' "$FIXTURES/probe"
-  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync >/dev/null 2>&1
-  [ "$?" -eq 3 ] || { fail "$name (--require rsync should still exit 3 on a missing rsync)"; return; }
-  sed -i 's/^hasRsync\tno/hasRsync\tyes/' "$FIXTURES/probe"
+  # --summary teleports are the only ones that do not need `claude` on the
+  # target, so --require narrows the list to that one dependency — but never to
+  # jq or git, which remote-setup.sh uses in every mode.
+  sed -i 's/^hasJq\tno/hasJq\tyes/; s/^claudeVersion\t.*/claudeVersion\t/' "$FIXTURES/probe"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
+  [ "$?" -eq 0 ] || { fail "$name (--require rsync,jq,git should ignore a missing claude)"; return; }
+  sed -i 's/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
+  [ "$?" -eq 3 ] || { fail "$name (a --summary teleport still needs jq on the target)"; return; }
+  sed -i 's/^hasJq\tno/hasJq\tyes/; s/^hasGit\tyes/hasGit\tno/' "$FIXTURES/probe"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
+  [ "$?" -eq 3 ] || { fail "$name (a --summary teleport still needs git on the target)"; return; }
+  sed -i 's/^hasGit\tno/hasGit\tyes/' "$FIXTURES/probe"
 
   # Unreachable host -> exit 2.
   touch "$FIXTURES/down"

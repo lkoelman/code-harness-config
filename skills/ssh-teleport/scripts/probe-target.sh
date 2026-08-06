@@ -10,17 +10,19 @@
 # later `git clone`/`git fetch` on the target would actually get.
 #
 # Exit 2 = target unreachable. Exit 3 = target is missing one of --require's
-# dependencies (default: claude, jq and rsync — pass e.g. `--require rsync` for
-# a --summary teleport, which never touches claude or jq on the target).
+# dependencies (default: claude, jq, rsync and git — pass `--require rsync,jq,git`
+# for a --summary teleport, which is the only one of the four that never needs
+# `claude` on the target; jq and git are still required, because remote-setup.sh
+# uses both in every mode).
 #
 # Usage:
 #   probe-target.sh --host <host> [--user <user>] [--repo-path <path>]
-#                    [--require <comma-list, default jq,rsync,claude>]
+#                    [--require <comma-list, default jq,rsync,git,claude>]
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
 
-HOST=""; USER_OVERRIDE=""; REPO_PATH_HINT=""; REQUIRE="jq,rsync,claude"
+HOST=""; USER_OVERRIDE=""; REPO_PATH_HINT=""; REQUIRE="jq,rsync,git,claude"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --host) HOST="${2:-}"; shift 2 ;;
@@ -73,6 +75,7 @@ printf "remoteHome\t%s\n" "$HOME"
 printf "claudeVersion\t%s\n" "$(command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null)"
 printf "hasJq\t%s\n" "$(command -v jq >/dev/null 2>&1 && echo yes || echo no)"
 printf "hasRsync\t%s\n" "$(command -v rsync >/dev/null 2>&1 && echo yes || echo no)"
+printf "hasGit\t%s\n" "$(command -v git >/dev/null 2>&1 && echo yes || echo no)"
 
 # Agent forwarding is what lets the clone/fetch below use the caller keys.
 if [ -n "${SSH_AUTH_SOCK:-}" ] && ssh-add -l >/dev/null 2>&1; then
@@ -96,15 +99,18 @@ if [ -n "$repo" ]; then
   printf "originMatches\tyes\n"
   git -C "$repo" cat-file -e "$commit^{commit}" 2>/dev/null \
     && printf "headPresent\tyes\n" || printf "headPresent\tno\n"
-  if git -C "$repo" worktree list --porcelain 2>/dev/null | grep -qx "branch refs/heads/$branch"; then
-    printf "branchCheckedOut\tyes\n"
+  # Ref existence, not checked-out-ness: this is the exact condition
+  # remote-setup.sh uses to decide whether to fall back to a suffixed branch
+  # name, so the two must agree or the predicted name would be wrong.
+  if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+    printf "branchExists\tyes\n"
   else
-    printf "branchCheckedOut\tno\n"
+    printf "branchExists\tno\n"
   fi
 else
   printf "originMatches\tno\n"
   printf "headPresent\tno\n"
-  printf "branchCheckedOut\tno\n"
+  printf "branchExists\tno\n"
 fi
 
 # A session already open on the target must not be written under.
@@ -123,19 +129,20 @@ if [ "$?" -ne 0 ]; then
   exit 2
 fi
 
-REMOTE_HOME=""; CLAUDE_VERSION=""; HAS_JQ=no; HAS_RSYNC=no; AGENT_OK=no
-REPO_PATH=""; ORIGIN_MATCHES=no; HEAD_PRESENT=no; BRANCH_CHECKED_OUT=no; SESSION_LIVE=no
+REMOTE_HOME=""; CLAUDE_VERSION=""; HAS_JQ=no; HAS_RSYNC=no; HAS_GIT=no; AGENT_OK=no
+REPO_PATH=""; ORIGIN_MATCHES=no; HEAD_PRESENT=no; BRANCH_EXISTS=no; SESSION_LIVE=no
 while IFS=$'\t' read -r key value; do
   case "$key" in
     remoteHome) REMOTE_HOME="$value" ;;
     claudeVersion) CLAUDE_VERSION="${value%% *}" ;;
     hasJq) HAS_JQ="$value" ;;
     hasRsync) HAS_RSYNC="$value" ;;
+    hasGit) HAS_GIT="$value" ;;
     agentForwardingOk) AGENT_OK="$value" ;;
     repoPath) REPO_PATH="$value" ;;
     originMatches) ORIGIN_MATCHES="$value" ;;
     headPresent) HEAD_PRESENT="$value" ;;
-    branchCheckedOut) BRANCH_CHECKED_OUT="$value" ;;
+    branchExists) BRANCH_EXISTS="$value" ;;
     sessionLive) SESSION_LIVE="$value" ;;
   esac
 done <<<"$PROBE"
@@ -170,24 +177,27 @@ jq -n --arg host "$HOST" --arg user "$TARGET_USER" --arg hostname "${CFG_HOSTNAM
       --arg suggested "$SUGGESTED_WORKTREE" \
       --argjson userFromConfig "$USER_FROM_CONFIG" \
       --argjson hasJq "$(yesno "$HAS_JQ")" --argjson hasRsync "$(yesno "$HAS_RSYNC")" \
+      --argjson hasGit "$(yesno "$HAS_GIT")" \
       --argjson agentForwardingOk "$(yesno "$AGENT_OK")" \
       --argjson originMatches "$(yesno "$ORIGIN_MATCHES")" \
       --argjson headPresent "$(yesno "$HEAD_PRESENT")" \
-      --argjson branchCheckedOut "$(yesno "$BRANCH_CHECKED_OUT")" \
+      --argjson branchExists "$(yesno "$BRANCH_EXISTS")" \
       --argjson sessionLive "$(yesno "$SESSION_LIVE")" \
       --argjson localAgentKeys "$LOCAL_AGENT_KEYS" \
   '{host: $host, user: $user, hostname: $hostname, port: $port, dest: $dest,
     userFromConfig: $userFromConfig, remoteHome: $remoteHome,
     claudeVersion: $claudeVersion, hasJq: $hasJq, hasRsync: $hasRsync,
+    hasGit: $hasGit,
     agentForwardingOk: $agentForwardingOk, localAgentKeys: $localAgentKeys,
     repoPath: $repoPath, originUrl: $originUrl, originMatches: $originMatches,
     headPresent: $headPresent, branch: $branch, commit: $commit,
-    branchCheckedOut: $branchCheckedOut, sessionLive: $sessionLive,
+    branchExists: $branchExists, sessionLive: $sessionLive,
     suggestedWorktreePath: $suggested}'
 
 missing=""
 case ",$REQUIRE," in *,jq,*) [ "$HAS_JQ" = "yes" ] || missing="$missing jq" ;; esac
 case ",$REQUIRE," in *,rsync,*) [ "$HAS_RSYNC" = "yes" ] || missing="$missing rsync" ;; esac
+case ",$REQUIRE," in *,git,*) [ "$HAS_GIT" = "yes" ] || missing="$missing git" ;; esac
 case ",$REQUIRE," in *,claude,*) [ -n "$CLAUDE_VERSION" ] || missing="$missing claude" ;; esac
 if [ -n "$missing" ]; then
   echo "error: $DEST is missing:$missing" >&2
