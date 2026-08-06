@@ -2,6 +2,8 @@
 
 Work down this list from the symptom the user actually reports. Every error string here is one Claude Code, git or ssh really prints.
 
+**"The session does not resume" and "Trust and first launch" below are default-mode-only** — a `--summary` teleport has no transcript and never touches `~/.claude.json`, so neither section applies to it. "Reaching `origin` from the target", "The worktree", and "The working tree does not match" apply to both modes, since both create a worktree and rsync the same dirty files. See "`--summary` mode" further down for that mode's own failure shapes.
+
 ## The session does not resume
 
 **`No conversation found with session ID: <id>`** — the transcript is not in the project directory for the resume directory's `realpath`. Usual causes, in order of likelihood:
@@ -59,14 +61,33 @@ Do not reach for `StrictHostKeyChecking=no`; `accept-new` trusts an unknown host
 
 ## `/rewind` after a move
 
-In-repo history works: the backup filenames hash the *relative* tracking path, which does not change. Out-of-repo entries — most visibly the plan file under `~/.claude/plans/` — were keyed by absolute path, and although the transcript's key is rewritten, the backup filename still hashes the old one, so those specific pre-move versions are not reachable. Edits made after the teleport rewind normally.
+In-repo history works: the backup filenames hash the *relative* tracking path, which does not change. Out-of-repo entries — most visibly the plan file under `~/.claude/plans/` — were keyed by absolute path, and although the transcript's key is rewritten, the backup filename still hashes the old one, so those specific pre-move versions are not reachable. Edits made after the teleport rewind normally. (`--summary` mode has no file history at all, so this section does not apply to it.)
+
+## `--summary` mode
+
+**`error: check-repo needs --path and --commit`** — a plain usage error; both flags are required and there is no default for either.
+
+**`check-repo` exits 7 with `worktree: false`.** The path is not a git worktree at all — `worktree` (step 4) did not run, ran against a different path than what `check-repo` was given, or something removed the `.git` file inside it after the fact. Confirm with `git -C <path> rev-parse --git-dir` on the target directly.
+
+**`check-repo` exits 7 with `commitMatches: false`.** `HEAD` in the worktree is not the commit the teleport created it at. This should not happen from the skill's own steps, since nothing in `--summary` mode commits — if it does, something else on the target (a person, another process) moved that worktree's `HEAD` between step 4 and this check. It is not caused by the rsynced dirty files: those change the working tree and the index, never `HEAD`.
+
+**`check-repo` exits 7 with `summaryPresent: false`.** The single-file rsync of the handoff note either did not run or landed at the wrong name — check that the `--summary-file` argument matches the exact filename used in the `rsync` command in step 6, including the datetime.
+
+**The handoff note reads as generic or unhelpful.** Not a script bug — there is no script involved in writing it. If it does not orient the next reader, the fix is to rewrite it with more of what "The summary document" in SKILL.md asks for, not to look for a technical cause.
 
 ## Diagnosing from the target
 
-`remote-setup.sh verify` reports each check separately, so run it before guessing:
+**Default mode:** `remote-setup.sh verify` reports each check separately, so run it before guessing:
 
 ```bash
 ssh <host> bash -s -- verify --path <worktree> --session-id <sid> < scripts/remote-setup.sh
 ```
 
 `worktree: false` is a git problem, `transcriptPresent: false` an encoding or rsync problem, `cwdMatches: false` a rewrite problem, `trusted: false` a `register` problem. `resumable: false` means the transcript has no user or assistant entry at all, which points at a truncated transfer.
+
+**`--summary` mode:** `remote-setup.sh check-repo` is the equivalent, without a session to check:
+
+```bash
+ssh <host> bash -s -- check-repo --path <worktree> --commit <sha> \
+    --summary-file "TELEPORT-<datetime>.md" < scripts/remote-setup.sh
+```

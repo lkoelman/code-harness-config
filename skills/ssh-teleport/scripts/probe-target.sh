@@ -9,20 +9,24 @@
 # The remote round trip uses `ssh -A` so that `agentForwardingOk` reflects what a
 # later `git clone`/`git fetch` on the target would actually get.
 #
-# Exit 2 = target unreachable. Exit 3 = target is missing claude, jq or rsync.
+# Exit 2 = target unreachable. Exit 3 = target is missing one of --require's
+# dependencies (default: claude, jq and rsync — pass e.g. `--require rsync` for
+# a --summary teleport, which never touches claude or jq on the target).
 #
 # Usage:
 #   probe-target.sh --host <host> [--user <user>] [--repo-path <path>]
+#                    [--require <comma-list, default jq,rsync,claude>]
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
 
-HOST=""; USER_OVERRIDE=""; REPO_PATH_HINT=""
+HOST=""; USER_OVERRIDE=""; REPO_PATH_HINT=""; REQUIRE="jq,rsync,claude"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --host) HOST="${2:-}"; shift 2 ;;
     --user) USER_OVERRIDE="${2:-}"; shift 2 ;;
     --repo-path) REPO_PATH_HINT="${2:-}"; shift 2 ;;
+    --require) REQUIRE="${2:-}"; shift 2 ;;
     -h|--help)
       awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
       exit 0 ;;
@@ -182,9 +186,9 @@ jq -n --arg host "$HOST" --arg user "$TARGET_USER" --arg hostname "${CFG_HOSTNAM
     suggestedWorktreePath: $suggested}'
 
 missing=""
-[ "$HAS_JQ" = "yes" ] || missing="$missing jq"
-[ "$HAS_RSYNC" = "yes" ] || missing="$missing rsync"
-[ -n "$CLAUDE_VERSION" ] || missing="$missing claude"
+case ",$REQUIRE," in *,jq,*) [ "$HAS_JQ" = "yes" ] || missing="$missing jq" ;; esac
+case ",$REQUIRE," in *,rsync,*) [ "$HAS_RSYNC" = "yes" ] || missing="$missing rsync" ;; esac
+case ",$REQUIRE," in *,claude,*) [ -n "$CLAUDE_VERSION" ] || missing="$missing claude" ;; esac
 if [ -n "$missing" ]; then
   echo "error: $DEST is missing:$missing" >&2
   exit 3

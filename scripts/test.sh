@@ -842,6 +842,15 @@ EOF
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
   [ "$?" -eq 3 ] || { fail "$name (a target without jq should exit 3)"; return; }
 
+  # --summary teleports never touch claude or jq on the target, so --require
+  # narrows what is mandatory: missing jq is fine, missing rsync still isn't.
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync >/dev/null 2>&1
+  [ "$?" -eq 0 ] || { fail "$name (--require rsync should ignore a missing jq)"; return; }
+  sed -i 's/^hasRsync\tyes/hasRsync\tno/' "$FIXTURES/probe"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync >/dev/null 2>&1
+  [ "$?" -eq 3 ] || { fail "$name (--require rsync should still exit 3 on a missing rsync)"; return; }
+  sed -i 's/^hasRsync\tno/hasRsync\tyes/' "$FIXTURES/probe"
+
   # Unreachable host -> exit 2.
   touch "$FIXTURES/down"
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
@@ -940,6 +949,52 @@ EOF
   pass "$name"
 }
 
+test_ssh_teleport_remote_setup_check_repo() {
+  local name="skill ssh-teleport: remote-setup.sh check-repo verifies a --summary teleport"
+  local d; d="$(mktemp -d)"; SANDBOXES+=("$d")
+  local rs="$REPO/skills/ssh-teleport/scripts/remote-setup.sh"
+
+  mkdir -p "$d/repo"
+  git -C "$d/repo" init -q --initial-branch=main
+  git -C "$d/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  local sha; sha="$(git -C "$d/repo" rev-parse HEAD)"
+  git -C "$d/repo" worktree add "$d/wt" -b feature "$sha" >/dev/null
+
+  # No --summary-file: only the worktree and its commit are checked.
+  local out
+  out="$("$rs" check-repo --path "$d/wt" --commit "$sha" 2>&1)" \
+    || { fail "$name (check-repo failed on a clean worktree: $out)"; return; }
+  jq -e '.worktree and .commitMatches and .summaryPresent' >/dev/null <<<"$out" \
+    || { fail "$name (a clean worktree should report everything true: $out)"; return; }
+
+  # Uncommitted files (the whole point of --summary mode) do not move HEAD, so
+  # they must not trip the commit check.
+  echo dirty >"$d/wt/dirty.txt"
+  out="$("$rs" check-repo --path "$d/wt" --commit "$sha" 2>&1)" \
+    || { fail "$name (an uncommitted file should not fail check-repo: $out)"; return; }
+
+  # The handoff summary is checked when named, and its absence is exit 7.
+  "$rs" check-repo --path "$d/wt" --commit "$sha" --summary-file "TELEPORT-2026.md" >/dev/null 2>&1
+  [ "$?" -eq 7 ] || { fail "$name (a missing summary file should exit 7)"; return; }
+  echo "# handoff" >"$d/wt/TELEPORT-2026.md"
+  out="$("$rs" check-repo --path "$d/wt" --commit "$sha" --summary-file "TELEPORT-2026.md" 2>&1)" \
+    || { fail "$name (check-repo failed once the summary file exists: $out)"; return; }
+  jq -e '.summaryPresent' >/dev/null <<<"$out" \
+    || { fail "$name (an existing summary file should report summaryPresent: $out)"; return; }
+
+  # A commit mismatch is exit 7 too.
+  git -C "$d/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m second
+  "$rs" check-repo --path "$d/wt" --commit "$(git -C "$d/repo" rev-parse HEAD)" >/dev/null 2>&1
+  [ "$?" -eq 7 ] || { fail "$name (a commit mismatch should exit 7)"; return; }
+
+  # A path that is not a worktree at all is exit 7, not a crash.
+  mkdir -p "$d/notawt"
+  "$rs" check-repo --path "$d/notawt" --commit "$sha" >/dev/null 2>&1
+  [ "$?" -eq 7 ] || { fail "$name (a non-worktree path should exit 7)"; return; }
+
+  pass "$name"
+}
+
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough
 test_harnesses_targeting
@@ -957,6 +1012,7 @@ test_ssh_teleport_encodes_paths
 test_ssh_teleport_rewrites_transcript
 test_ssh_teleport_probe_parses_target
 test_ssh_teleport_remote_setup_worktree
+test_ssh_teleport_remote_setup_check_repo
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

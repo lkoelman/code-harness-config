@@ -17,6 +17,11 @@
 #   verify --path <path> --session-id <uuid>
 #       Check the landed session without launching Claude. Exit 6 if it would not
 #       resume.
+#   check-repo --path <path> --commit <sha> [--summary-file <name>]
+#       For a --summary teleport, which has no session to verify: check the
+#       worktree is a real worktree, HEAD is the expected commit (dirty files
+#       never move it), and, when given, that the handoff summary file exists
+#       directly under <path>. Exit 7 if any of that is not so.
 set -uo pipefail
 export LC_ALL=C
 
@@ -24,9 +29,10 @@ export LC_ALL=C
 # streamed over ssh there is no file on disk to read the header block back from.
 usage() {
   cat <<'EOF'
-usage: remote-setup.sh worktree --repo <path> --path <path> --branch <name> --commit <sha> --suffix <s>
-       remote-setup.sh register --path <path> [--session-id <uuid>]
-       remote-setup.sh verify   --path <path> --session-id <uuid>
+usage: remote-setup.sh worktree   --repo <path> --path <path> --branch <name> --commit <sha> --suffix <s>
+       remote-setup.sh register   --path <path> [--session-id <uuid>]
+       remote-setup.sh verify     --path <path> --session-id <uuid>
+       remote-setup.sh check-repo --path <path> --commit <sha> [--summary-file <name>]
 EOF
 }
 
@@ -191,6 +197,49 @@ case "$CMD" in
        || [ "$RESUMABLE" != true ] || [ "$CWD_OK" != true ]; then
       echo "error: the session would not resume at $WT_PATH" >&2
       exit 6
+    fi
+    ;;
+
+  check-repo)
+    WT_PATH=""; COMMIT=""; SUMMARY_FILE=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --path) WT_PATH="${2:-}"; shift 2 ;;
+        --commit) COMMIT="${2:-}"; shift 2 ;;
+        --summary-file) SUMMARY_FILE="${2:-}"; shift 2 ;;
+        *) echo "error: unknown argument '$1'" >&2; exit 1 ;;
+      esac
+    done
+    if [ -z "$WT_PATH" ] || [ -z "$COMMIT" ]; then
+      echo "error: check-repo needs --path and --commit" >&2; exit 1
+    fi
+
+    REAL_PATH="$(cd "$WT_PATH" 2>/dev/null && pwd -P)" || REAL_PATH=""
+    WORKTREE_OK=false
+    [ -n "$REAL_PATH" ] && git -C "$REAL_PATH" rev-parse --git-dir >/dev/null 2>&1 && WORKTREE_OK=true
+
+    # Dirty files travel by rsync, not by commit, so HEAD must still be exactly
+    # the commit the worktree was created at.
+    COMMIT_OK=false
+    if [ "$WORKTREE_OK" = true ] && [ "$(git -C "$REAL_PATH" rev-parse HEAD 2>/dev/null)" = "$COMMIT" ]; then
+      COMMIT_OK=true
+    fi
+
+    SUMMARY_OK=true
+    if [ -n "$SUMMARY_FILE" ]; then
+      SUMMARY_OK=false
+      [ -n "$REAL_PATH" ] && [ -f "$REAL_PATH/$SUMMARY_FILE" ] && SUMMARY_OK=true
+    fi
+
+    jq -n --arg path "${REAL_PATH:-$WT_PATH}" --arg summaryFile "$SUMMARY_FILE" \
+          --argjson worktree "$WORKTREE_OK" --argjson commitMatches "$COMMIT_OK" \
+          --argjson summaryPresent "$SUMMARY_OK" \
+      '{path: $path, summaryFile: $summaryFile, worktree: $worktree,
+        commitMatches: $commitMatches, summaryPresent: $summaryPresent}'
+
+    if [ "$WORKTREE_OK" != true ] || [ "$COMMIT_OK" != true ] || [ "$SUMMARY_OK" != true ]; then
+      echo "error: the repo did not land cleanly at $WT_PATH" >&2
+      exit 7
     fi
     ;;
 

@@ -2,6 +2,8 @@
 
 Read this when a teleport lands somewhere unexpected, or when something in the session did not survive the move and you need to know whether it ever could have.
 
+This entire document is about **default-mode** teleports. A `--summary` teleport never reads or writes anything described here — it copies the repo and a written handoff note, nothing under `~/.claude`. If you are troubleshooting a `--summary` run, this is the wrong file; there is no session-layout problem to have.
+
 Everything below was verified against Claude Code **2.1.222** on Linux. Anthropic's own documentation is explicit that this is not a stable contract:
 
 > The entry format is internal to Claude Code and changes between versions, so scripts that parse these files directly can break on any release.
