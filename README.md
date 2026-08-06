@@ -24,7 +24,8 @@ A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`descri
 - [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `github-cli` skill and the GitHub-driven agents.
 - The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
 - The [`gh-webhook`](https://github.com/cli/gh-webhook) extension, only if you want push-style GitHub event forwarding instead of polling: `gh extension install cli/gh-webhook`. Note it needs admin rights on the repo to register the webhook, plus a local HTTP receiver.
-- `jq` — used by the `github-cli` and `autofix-pr-local` skills to read structured `gh` output.
+- `jq` — used by the `github-cli`, `autofix-pr-local` and `ssh-teleport` skills to read structured JSON.
+- `rsync` — used by the `ssh-teleport` skill to move session data between machines. It also needs `rsync`, `jq` and `claude` **on the target**, at a Claude Code version matching the source; and, so the target can pull from `origin` without credentials of its own, a local `ssh-agent` holding a usable key (`ssh-add -l`) plus `AllowAgentForwarding` enabled on the target.
 
 To install all of the above:
 

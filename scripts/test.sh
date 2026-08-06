@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for scripts/build.sh, install.sh, uninstall.sh, and the scripts bundled
-# with the autofix-pr-local skill.
+# with the autofix-pr-local and ssh-teleport skills.
 # Each test runs against a throwaway sandbox copy of the scripts plus
 # fixture skills/agents/harnesses, so nothing here touches the real
 # skills/ or agents/ tree or the real $HOME. The skill-script tests add a
@@ -566,6 +566,381 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Sandbox for the scripts bundled with the ssh-teleport skill: a throwaway $HOME
+# holding one fake Claude Code session (transcript, subagent transcript, tool
+# result, file history, tasks, plan file) plus a throwaway git repo with an
+# origin remote. Nothing here reaches the network or the real ~/.claude.
+# Prints the sandbox path; the caller uses $d/home as HOME and $d/repo as cwd.
+new_teleport_sandbox() {
+  local d
+  d="$(mktemp -d)"
+  SANDBOXES+=("$d")
+
+  local sid="11111111-2222-3333-4444-555555555555"
+  local src="$d/repo"
+  local enc
+  enc="$(printf '%s' "$src" | sed 's/[^a-zA-Z0-9]/-/g')"
+  local cc="$d/home/.claude"
+
+  mkdir -p "$src" "$cc/projects/$enc/$sid/subagents" "$cc/projects/$enc/$sid/tool-results" \
+           "$cc/file-history/$sid" "$cc/tasks/$sid" "$cc/session-env/$sid" "$cc/plans"
+
+  git -C "$src" init -q
+  git -C "$src" remote add origin git@github.com:owner/repo.git
+  echo "tracked" >"$src/tracked.txt"
+  git -C "$src" add tracked.txt
+  git -C "$src" -c user.email=t@t -c user.name=t commit -q -m init
+
+  # A transcript carrying every path-bearing field the rewrite has to reach.
+  # trackedFileBackups deliberately mixes a relative key (in-repo, must survive
+  # untouched) with an absolute one (out-of-repo, must be rewritten).
+  cat >"$cc/projects/$enc/$sid.jsonl" <<EOF
+{"type":"mode","mode":"normal","sessionId":"$sid"}
+{"type":"file-history-snapshot","messageId":"m1","snapshot":{"messageId":"m1","trackedFileBackups":{"tracked.txt":{"realParentDir":"$src","backupFileName":"aaaaaaaaaaaaaaaa@v1"},"$d/home/.claude/plans/teleport-fixture.md":{"realParentDir":"$d/home/.claude/plans","backupFileName":"bbbbbbbbbbbbbbbb@v1"}}},"isSnapshotUpdate":false}
+{"parentUuid":null,"isSidechain":false,"type":"user","uuid":"u-1","timestamp":"2026-08-05T18:05:57.952Z","message":{"role":"user","content":"look at $src/tracked.txt"},"userType":"external","entrypoint":"cli","cwd":"$src","sessionId":"$sid","session_id":"$sid","version":"2.1.222","gitBranch":"main","slug":"teleport-fixture"}
+{"parentUuid":"u-1","isSidechain":false,"type":"assistant","uuid":"a-1","timestamp":"2026-08-05T18:06:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_x","name":"Read","input":{"file_path":"$src/tracked.txt"}}]},"cwd":"$src","sessionId":"$sid","version":"2.1.222","gitBranch":"main"}
+{"type":"file-history-delta","messageId":"m2","snapshotMessageId":"m1","trackingPath":"tracked.txt","backup":{"backupFileName":"aaaaaaaaaaaaaaaa@v1","version":1,"realParentDir":"$src"},"timestamp":"2026-08-05T18:06:01.000Z"}
+{"parentUuid":"a-1","isSidechain":false,"type":"attachment","uuid":"at-1","timestamp":"2026-08-05T18:06:02.000Z","attachment":{"type":"plan_mode","planFilePath":"$d/home/.claude/plans/teleport-fixture.md"},"cwd":"$src","sessionId":"$sid","version":"2.1.222","gitBranch":"main"}
+{"type":"last-prompt","lastPrompt":"look at $src/tracked.txt","leafUuid":"at-1","sessionId":"$sid"}
+EOF
+
+  cat >"$cc/projects/$enc/$sid/subagents/agent-abc.jsonl" <<EOF
+{"parentUuid":null,"type":"user","uuid":"s-1","message":{"role":"user","content":"explore $src"},"cwd":"$src","sessionId":"$sid","gitBranch":"main"}
+EOF
+  echo '{"agentType":"Explore","description":"fixture","toolUseId":"toolu_x","spawnDepth":1}' \
+    >"$cc/projects/$enc/$sid/subagents/agent-abc.meta.json"
+  echo "a saved tool result mentioning $src" >"$cc/projects/$enc/$sid/tool-results/toolu_x.txt"
+
+  echo "pre-edit contents" >"$cc/file-history/$sid/aaaaaaaaaaaaaaaa@v1"
+  echo "4" >"$cc/tasks/$sid/.highwatermark"
+  : >"$cc/tasks/$sid/.lock"
+  echo "# fixture plan for $src" >"$cc/plans/teleport-fixture.md"
+  echo "SECRET" >"$cc/.credentials.json"
+
+  cat >"$cc/history.jsonl" <<EOF
+{"display":"unrelated","pastedContents":{},"timestamp":1785226928594,"project":"/somewhere/else","sessionId":"99999999-0000-0000-0000-000000000000"}
+{"display":"look at tracked.txt","pastedContents":{},"timestamp":1785953686750,"project":"$src","sessionId":"$sid"}
+EOF
+
+  echo "$d"
+}
+
+test_ssh_teleport_encodes_paths() {
+  local name="skill ssh-teleport: stage-session.sh encodes target paths and refuses the ambiguous ones"
+  local d; d="$(new_teleport_sandbox)"
+  local stage="$REPO/skills/ssh-teleport/scripts/stage-session.sh"
+  local sid="11111111-2222-3333-4444-555555555555"
+
+  # Every non-alphanumeric becomes '-'; case is preserved; runs are not collapsed.
+  local out enc
+  out="$(HOME="$d/home" "$stage" --session-id "$sid" --target-cwd '/home/Bob/code/my_repo.git v2' \
+          --target-home /home/Bob --target-branch main --out "$d/stage1" 2>&1)" \
+    || { fail "$name (staging a plain path failed: $out)"; return; }
+  enc="$(jq -r '.encodedDir' <<<"$out")"
+  if [ "$enc" != "-home-Bob-code-my-repo-git-v2" ]; then
+    fail "$name (encoded '$enc', expected '-home-Bob-code-my-repo-git-v2')"; return
+  fi
+
+  # Non-ASCII: Claude replaces per UTF-16 code unit, sed per byte, so refuse.
+  HOME="$d/home" "$stage" --session-id "$sid" --target-cwd '/home/bob/프로젝트/app' \
+    --target-home /home/bob --target-branch main --out "$d/stage2" >/dev/null 2>&1
+  if [ "$?" -ne 4 ]; then
+    fail "$name (a non-ASCII target path should exit 4)"; return
+  fi
+
+  # Over 200 chars: the suffix is an internal hash we cannot reproduce, so refuse.
+  local long; long="/home/bob/$(printf 'a%.0s' $(seq 1 210))"
+  HOME="$d/home" "$stage" --session-id "$sid" --target-cwd "$long" \
+    --target-home /home/bob --target-branch main --out "$d/stage3" >/dev/null 2>&1
+  if [ "$?" -ne 4 ]; then
+    fail "$name (an over-200-char encoding should exit 4)"; return
+  fi
+
+  pass "$name"
+}
+
+test_ssh_teleport_rewrites_transcript() {
+  local name="skill ssh-teleport: stage-session.sh rewrites paths and stages the whole session"
+  local d; d="$(new_teleport_sandbox)"
+  local stage="$REPO/skills/ssh-teleport/scripts/stage-session.sh"
+  local sid="11111111-2222-3333-4444-555555555555"
+  local src="$d/repo"
+  local dst="/home/bob/worktrees-repo/feature"
+  local enc="-home-bob-worktrees-repo-feature"
+
+  local out
+  out="$(HOME="$d/home" "$stage" --session-id "$sid" --target-cwd "$dst" \
+          --target-home /home/bob --target-branch feature --out "$d/stage" 2>&1)" \
+    || { fail "$name (stage-session.sh exited nonzero: $out)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (manifest is not JSON)"; return; }
+
+  local t="$d/stage/.claude/projects/$enc/$sid.jsonl"
+  [ -f "$t" ] || { fail "$name (no transcript at the target-encoded path)"; return; }
+
+  # Every line must still be valid JSON after the rewrite.
+  local n=0
+  while IFS= read -r line; do
+    n=$((n + 1))
+    jq -e . >/dev/null 2>&1 <<<"$line" || { fail "$name (line $n is not valid JSON)"; return; }
+  done <"$t"
+
+  # No trace of the source path or the source home anywhere in the transcript.
+  if grep -qF "$src" "$t"; then
+    fail "$name (source path survives in the transcript)"; return
+  fi
+  if grep -qF "$d/home" "$t"; then
+    fail "$name (source home survives in the transcript)"; return
+  fi
+
+  local got
+  got="$(jq -sr '[ (map(select(.cwd)) | map(.cwd) | unique | join(",")),
+                   (map(select(.gitBranch)) | map(.gitBranch) | unique | join(",")),
+                   (map(select(.sessionId)) | map(.sessionId) | unique | join(",")),
+                   (map(select(.type == "attachment"))[0].attachment.planFilePath),
+                   (map(select(.type == "file-history-delta"))[0].backup.realParentDir),
+                   (map(select(.type == "file-history-delta"))[0].trackingPath),
+                   (map(select(.type == "user" and .uuid == "u-1"))[0].uuid)
+                 ] | join("|")' "$t")"
+  local want="$dst|feature|$sid|/home/bob/.claude/plans/teleport-fixture.md|$dst|tracked.txt|u-1"
+  if [ "$got" != "$want" ]; then
+    fail "$name (rewrite wrong:
+  got  $got
+  want $want)"; return
+  fi
+
+  # trackedFileBackups: the relative in-repo key survives verbatim (its
+  # file-history hash is over that relative path), the absolute one is rewritten.
+  jq -se 'map(select(.type == "file-history-snapshot"))[0].snapshot.trackedFileBackups
+          | has("tracked.txt") and has("/home/bob/.claude/plans/teleport-fixture.md")' \
+     >/dev/null "$t" || { fail "$name (trackedFileBackups keys wrong)"; return; }
+
+  # The resumability test in Claude Code: the file must hold a user/assistant line.
+  grep -q '"type":"user"' "$t" || { fail "$name (no user line left, session would not resume)"; return; }
+
+  # Sidecars, file history, tasks and the plan file all travel; the lock and the
+  # credentials file do not.
+  local f
+  for f in "projects/$enc/$sid/subagents/agent-abc.jsonl" \
+           "projects/$enc/$sid/subagents/agent-abc.meta.json" \
+           "projects/$enc/$sid/tool-results/toolu_x.txt" \
+           "file-history/$sid/aaaaaaaaaaaaaaaa@v1" \
+           "tasks/$sid/.highwatermark" \
+           "plans/teleport-fixture.md"; do
+    [ -e "$d/stage/.claude/$f" ] || { fail "$name (did not stage $f)"; return; }
+  done
+  for f in "tasks/$sid/.lock" ".credentials.json"; do
+    [ -e "$d/stage/.claude/$f" ] && { fail "$name (staged $f, which must never travel)"; return; }
+  done
+
+  # The subagent transcript is rewritten too.
+  if grep -qF "$src" "$d/stage/.claude/projects/$enc/$sid/subagents/agent-abc.jsonl"; then
+    fail "$name (source path survives in the subagent transcript)"; return
+  fi
+
+  # history.jsonl travels as a fragment holding only this session's lines.
+  local frag="$d/stage/.claude/ssh-teleport/$sid.history.jsonl"
+  [ -f "$frag" ] || { fail "$name (no history fragment)"; return; }
+  got="$(jq -sr '[length, (.[0].sessionId), (.[0].project)] | join("|")' "$frag")"
+  if [ "$got" != "1|$sid|$dst" ]; then
+    fail "$name (history fragment wrong: $got)"; return
+  fi
+
+  pass "$name"
+}
+
+# Sandbox for probe-target.sh: a throwaway git repo with an origin remote plus a
+# mock `ssh` on $PATH that records its argv and answers from $FIXTURES.
+new_ssh_sandbox() {
+  local d
+  d="$(mktemp -d)"
+  SANDBOXES+=("$d")
+  mkdir -p "$d/bin" "$d/fixtures" "$d/repo" "$d/home"
+
+  # Pin the branch name so the expectation below does not depend on the
+  # developer's init.defaultBranch.
+  git -C "$d/repo" init -q --initial-branch=main
+  git -C "$d/repo" remote add origin git@github.com:owner/repo.git
+  git -C "$d/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+
+  cat >"$d/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+# Mock ssh. Records argv in $FIXTURES/argv, answers `-G` from $FIXTURES/config-G
+# and a remote command from $FIXTURES/probe. Touch $FIXTURES/down for an
+# unreachable host.
+printf '%s\n' "$*" >>"$FIXTURES/argv"
+case " $* " in
+  *" -G "*) cat "$FIXTURES/config-G"; exit 0 ;;
+esac
+[ -f "$FIXTURES/down" ] && { echo "ssh: connect to host: No route to host" >&2; exit 255; }
+cat >/dev/null            # swallow the streamed script on stdin
+cat "$FIXTURES/probe"
+EOF
+  chmod +x "$d/bin/ssh"
+  echo "$d"
+}
+
+test_ssh_teleport_probe_parses_target() {
+  local name="skill ssh-teleport: probe-target.sh resolves the target and forwards the agent"
+  local d; d="$(new_ssh_sandbox)"
+  local probe="$REPO/skills/ssh-teleport/scripts/probe-target.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  cat >"$FIXTURES/config-G" <<'EOF'
+user remoteuser
+hostname 10.0.0.9
+port 22
+EOF
+  cat >"$FIXTURES/probe" <<'EOF'
+remoteHome	/home/remoteuser
+claudeVersion	2.1.222 (Claude Code)
+hasJq	yes
+hasRsync	yes
+repoPath	/home/remoteuser/code/repo
+originMatches	yes
+headPresent	yes
+branchCheckedOut	no
+sessionLive	no
+agentForwardingOk	yes
+EOF
+
+  local out
+  out="$(PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox 2>&1)" \
+    || { fail "$name (probe-target.sh exited nonzero: $out)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (output is not JSON: $out)"; return; }
+
+  local got
+  got="$(jq -r '[.user, .hostname, .remoteHome, .claudeVersion, (.hasJq|tostring),
+                 .repoPath, (.originMatches|tostring), (.headPresent|tostring),
+                 (.agentForwardingOk|tostring), .suggestedWorktreePath] | join("|")' <<<"$out")"
+  local want="remoteuser|10.0.0.9|/home/remoteuser|2.1.222|true|/home/remoteuser/code/repo|true|true|true|/home/remoteuser/code/worktrees-repo/main"
+  if [ "$got" != "$want" ]; then
+    fail "$name (probe wrong:
+  got  $got
+  want $want)"; return
+  fi
+
+  # The remote round trip must forward the agent, since it is what lets the
+  # target reach origin without its own key.
+  grep -q -- '-A' "$FIXTURES/argv" || { fail "$name (probe did not pass -A)"; return; }
+
+  # A refused forwarding is reported, not silently assumed to work.
+  sed -i 's/^agentForwardingOk\tyes/agentForwardingOk\tno/' "$FIXTURES/probe"
+  out="$(PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox 2>&1)"
+  jq -e '.agentForwardingOk == false' >/dev/null <<<"$out" \
+    || { fail "$name (refused agent forwarding not reported)"; return; }
+
+  # No repo found on the target -> empty repoPath, still exit 0 so the skill can ask.
+  sed -i 's|^repoPath\t.*|repoPath\t|; s/^originMatches\tyes/originMatches\tno/' "$FIXTURES/probe"
+  out="$(PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox 2>&1)" \
+    || { fail "$name (a missing target repo should not be fatal)"; return; }
+  jq -e '.repoPath == "" and .originMatches == false' >/dev/null <<<"$out" \
+    || { fail "$name (missing repo not reported)"; return; }
+
+  # Missing remote dependency -> exit 3.
+  sed -i 's/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
+  [ "$?" -eq 3 ] || { fail "$name (a target without jq should exit 3)"; return; }
+
+  # Unreachable host -> exit 2.
+  touch "$FIXTURES/down"
+  PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
+  [ "$?" -eq 2 ] || { fail "$name (an unreachable host should exit 2)"; return; }
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
+test_ssh_teleport_remote_setup_worktree() {
+  local name="skill ssh-teleport: remote-setup.sh adds the worktree and registers the path"
+  local d; d="$(mktemp -d)"; SANDBOXES+=("$d")
+  local rs="$REPO/skills/ssh-teleport/scripts/remote-setup.sh"
+  local sid="11111111-2222-3333-4444-555555555555"
+
+  mkdir -p "$d/home"
+  git -C "$d" init -q --initial-branch=main repo >/dev/null 2>&1 || {
+    mkdir -p "$d/repo"; git -C "$d/repo" init -q; }
+  git -C "$d/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  local sha; sha="$(git -C "$d/repo" rev-parse HEAD)"
+  local branch; branch="$(git -C "$d/repo" branch --show-current)"
+
+  # The session's own branch name is taken (it is checked out in the main
+  # worktree), so the fallback name must be used.
+  local out
+  out="$(HOME="$d/home" "$rs" worktree --repo "$d/repo" --path "$d/wt" \
+          --branch "$branch" --commit "$sha" --suffix 1111 2>&1)" \
+    || { fail "$name (worktree add failed: $out)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (worktree output is not JSON: $out)"; return; }
+  local got
+  got="$(jq -r '[.branch, .commit] | join("|")' <<<"$out")"
+  if [ "$got" != "$branch.teleport-1111|$sha" ]; then
+    fail "$name (expected the fallback branch at $sha, got $got)"; return
+  fi
+  [ -d "$d/wt" ] || { fail "$name (worktree directory not created)"; return; }
+
+  # A free branch name is used as-is, and the worktree lands on the commit.
+  out="$(HOME="$d/home" "$rs" worktree --repo "$d/repo" --path "$d/wt2" \
+          --branch feature --commit "$sha" --suffix 1111 2>&1)" \
+    || { fail "$name (second worktree add failed: $out)"; return; }
+  got="$(jq -r '.branch' <<<"$out")"
+  [ "$got" = "feature" ] || { fail "$name (free branch name not used: $got)"; return; }
+  [ "$(git -C "$d/wt2" rev-parse HEAD)" = "$sha" ] \
+    || { fail "$name (worktree is not on the requested commit)"; return; }
+
+  # Re-running against an existing worktree is a no-op, not an error.
+  out="$(HOME="$d/home" "$rs" worktree --repo "$d/repo" --path "$d/wt2" \
+          --branch feature --commit "$sha" --suffix 1111 2>&1)" \
+    || { fail "$name (re-running worktree should be idempotent: $out)"; return; }
+  jq -e '.created == false' >/dev/null <<<"$out" \
+    || { fail "$name (idempotent re-run should report created=false)"; return; }
+
+  # An unknown commit is refused rather than silently checked out elsewhere.
+  HOME="$d/home" "$rs" worktree --repo "$d/repo" --path "$d/wt3" --branch x \
+    --commit 0000000000000000000000000000000000000000 --suffix 1111 >/dev/null 2>&1
+  [ "$?" -eq 5 ] || { fail "$name (an unknown commit should exit 5)"; return; }
+
+  # register merges one project key without disturbing the rest of the file.
+  echo '{"numStartups":7,"projects":{"/other":{"hasTrustDialogAccepted":true}}}' >"$d/home/.claude.json"
+  mkdir -p "$d/home/.claude/ssh-teleport"
+  cat >"$d/home/.claude/ssh-teleport/$sid.history.jsonl" <<EOF
+{"display":"look","pastedContents":{},"timestamp":1,"project":"$d/wt2","sessionId":"$sid"}
+EOF
+  out="$(HOME="$d/home" "$rs" register --path "$d/wt2" --session-id "$sid" 2>&1)" \
+    || { fail "$name (register failed: $out)"; return; }
+  got="$(jq -r --arg p "$d/wt2" '[(.numStartups|tostring), (.projects[$p].hasTrustDialogAccepted|tostring),
+                                  (.projects["/other"].hasTrustDialogAccepted|tostring)] | join("|")' \
+         "$d/home/.claude.json")"
+  [ "$got" = "7|true|true" ] || { fail "$name (claude.json merge wrong: $got)"; return; }
+  [ "$(wc -l <"$d/home/.claude/history.jsonl")" -eq 1 ] \
+    || { fail "$name (history line not appended)"; return; }
+
+  # register twice must not duplicate the history line.
+  HOME="$d/home" "$rs" register --path "$d/wt2" --session-id "$sid" >/dev/null 2>&1
+  [ "$(wc -l <"$d/home/.claude/history.jsonl")" -eq 1 ] \
+    || { fail "$name (register duplicated the history line)"; return; }
+
+  # verify accepts a session landed at the encoded path for the worktree, and
+  # rejects one whose recorded cwd points somewhere else.
+  local real; real="$(cd "$d/wt2" && pwd -P)"
+  local enc; enc="$(printf '%s' "$real" | sed 's/[^a-zA-Z0-9]/-/g')"
+  mkdir -p "$d/home/.claude/projects/$enc"
+  printf '%s\n' "{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"$real\",\"sessionId\":\"$sid\"}" \
+    >"$d/home/.claude/projects/$enc/$sid.jsonl"
+  out="$(HOME="$d/home" "$rs" verify --path "$d/wt2" --session-id "$sid" 2>&1)" \
+    || { fail "$name (verify rejected a correctly landed session: $out)"; return; }
+  jq -e '.worktree and .transcriptPresent and .resumable and .cwdMatches and .trusted' \
+     >/dev/null <<<"$out" || { fail "$name (verify reported a bad state: $out)"; return; }
+
+  printf '%s\n' "{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"/elsewhere\",\"sessionId\":\"$sid\"}" \
+    >"$d/home/.claude/projects/$enc/$sid.jsonl"
+  HOME="$d/home" "$rs" verify --path "$d/wt2" --session-id "$sid" >/dev/null 2>&1
+  [ "$?" -eq 6 ] || { fail "$name (verify should exit 6 on a cwd mismatch)"; return; }
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
 test_splice_and_passthrough
 test_harnesses_targeting
 test_variant_headers
@@ -578,6 +953,10 @@ test_install_dry_run
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape
+test_ssh_teleport_encodes_paths
+test_ssh_teleport_rewrites_transcript
+test_ssh_teleport_probe_parses_target
+test_ssh_teleport_remote_setup_worktree
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
