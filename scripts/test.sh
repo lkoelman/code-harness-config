@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for scripts/build.sh, install.sh, uninstall.sh, and the scripts bundled
-# with the autofix-pr-local and ssh-teleport skills.
+# with the autofix-pr-local, grill-for-pr and ssh-teleport skills.
 # Each test runs against a throwaway sandbox copy of the scripts plus
 # fixture skills/agents/harnesses, so nothing here touches the real
 # skills/ or agents/ tree or the real $HOME. The skill-script tests add a
@@ -566,6 +566,138 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Sandbox for the script bundled with the grill-for-pr skill: a throwaway git
+# repo with a main branch and a feature branch whose diff covers every file kind
+# the script classifies, plus a mock `gh` answering the PR/issue/review-comment
+# calls from fixtures. Prints the sandbox path; the caller uses $d/repo as cwd.
+new_recon_sandbox() {
+  local d
+  d="$(mktemp -d)"
+  SANDBOXES+=("$d")
+  mkdir -p "$d/bin" "$d/fixtures" "$d/repo"
+  local g="git -C $d/repo -c user.email=t@t -c user.name=t"
+
+  $g init -q -b main
+  mkdir -p "$d/repo/src" "$d/repo/tests" "$d/repo/migrations" "$d/repo/.github/workflows"
+  echo "a" >"$d/repo/src/auth.py"
+  echo "b" >"$d/repo/src/old_name.py"
+  echo "l" >"$d/repo/package-lock.json"
+  echo "t" >"$d/repo/tests/test_auth.py"
+  echo "m" >"$d/repo/migrations/001_init.sql"
+  echo "c" >"$d/repo/.github/workflows/ci.yml"
+  echo "d" >"$d/repo/README.md"
+  printf '## What\n## Why\n' >"$d/repo/.github/pull_request_template.md"
+  printf '/src/ @alice\n*.sql @bob @db-team\n' >"$d/repo/.github/CODEOWNERS"
+  $g add -A >/dev/null; $g commit -qm init
+
+  $g checkout -qb feat
+  printf 'a\nchanged\nmore\n' >"$d/repo/src/auth.py"
+  $g mv src/old_name.py src/new_name.py
+  printf 'l\nlock churn\n' >"$d/repo/package-lock.json"
+  printf 't\nnew test\n' >"$d/repo/tests/test_auth.py"
+  printf 'm\nALTER TABLE x;\n' >"$d/repo/migrations/001_init.sql"
+  $g add -A >/dev/null; $g commit -qm "fix truncation (#42)"
+
+  cat >"$d/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+# Mock gh. Answers from $FIXTURES; touch $FIXTURES/down to simulate no auth.
+[ -f "$FIXTURES/down" ] && exit 1
+args="$*"
+case "$args" in
+  *"auth status"*) echo "logged in" ;;
+  *"-q .nameWithOwner"*) echo "owner/repo" ;;
+  *"-q .defaultBranchRef.name"*) echo "main" ;;
+  *"pr view"*) [ -f "$FIXTURES/view.json" ] || exit 1; cat "$FIXTURES/view.json" ;;
+  *"pr list"*) cat "$FIXTURES/merged.json" ;;
+  *"issue view"*) cat "$FIXTURES/issue.json" ;;
+  *"pulls/comments"*) cat "$FIXTURES/review-comments.json" ;;
+  *) echo "mock gh: unhandled '$args'" >&2; exit 1 ;;
+esac
+EOF
+  chmod +x "$d/bin/gh"
+  echo "$d"
+}
+
+test_pr_recon_shape() {
+  local name="skill grill-for-pr: pr-recon.sh classifies the diff and profiles reviewers"
+  local d; d="$(new_recon_sandbox)"
+  local recon="$REPO/skills/grill-for-pr/scripts/pr-recon.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  cat >"$FIXTURES/merged.json" <<'EOF'
+[{"number":9,"title":"Earlier PR","body":"house style","author":{"login":"alice"},
+  "reviews":[{"author":{"login":"dana"}},{"author":{"login":"coderabbitai[bot]"}}]}]
+EOF
+  cat >"$FIXTURES/issue.json" <<'EOF'
+{"number":42,"title":"CSV export truncates","state":"OPEN","labels":[{"name":"bug"}],"body":"silently stops at 10k"}
+EOF
+  cat >"$FIXTURES/review-comments.json" <<'EOF'
+[{"user":{"login":"dana","type":"User"},"path":"src/auth.py","body":"how much memory does this hold?"},
+ {"user":{"login":"coderabbitai[bot]","type":"Bot"},"path":"src/auth.py","body":"nit"},
+ {"user":{"login":"stranger","type":"User"},"path":"other.py","body":"unrelated"}]
+EOF
+
+  local out
+  out="$(PATH="$d/bin:$PATH" "$recon" --base main)" || { fail "$name (exited nonzero)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (output is not JSON)"; return; }
+
+  local check
+  check="$(jq -r '[(.diff.files|tostring), (.diff.byKind.code|tostring), (.diff.byKind.lockfile|tostring),
+                   (.diff.touchesMigrations|tostring), (.diff.hasTests|tostring),
+                   (.diff.pureRenames|length|tostring), (.issue.number|tostring),
+                   (.conventions.prTemplatePath)] | join(",")' <<<"$out")"
+  if [ "$check" != "5,2,1,true,true,1,42,.github/pull_request_template.md" ]; then
+    fail "$name (unexpected shape: $check)"; return
+  fi
+
+  # A pure rename is noise, not something to read; a lockfile likewise.
+  jq -e '(.diff.substantive | index("src/new_name.py")) == null
+         and (.diff.mechanical | index("src/new_name.py")) != null
+         and (.diff.mechanical | index("package-lock.json")) != null' >/dev/null <<<"$out" \
+    || { fail "$name (rename/lockfile not classified as mechanical)"; return; }
+  jq -e '.diff.substantive[0] == "src/auth.py"' >/dev/null <<<"$out" \
+    || { fail "$name (substantive files should lead with the biggest churn)"; return; }
+  jq -e '.issueRefs | index("#42")' >/dev/null <<<"$out" \
+    || { fail "$name (issue reference not found in the commit subject)"; return; }
+
+  # CODEOWNERS matches on the changed paths, and review comments narrow to the
+  # people who might actually review this — bots and strangers dropped.
+  jq -e '(.reviewers.codeowners | index("@alice")) and (.reviewers.codeowners | index("@bob"))
+         and (.reviewers.candidates | index("dana"))
+         and (.reviewers.recentReviewComments | length) == 1
+         and .reviewers.recentReviewComments[0].login == "dana"' >/dev/null <<<"$out" \
+    || { fail "$name (reviewer profile wrong: $(jq -c .reviewers <<<"$out"))"; return; }
+
+  # No open PR on this branch is the normal pre-creation case, not an error.
+  jq -e '.pr == null and (.notes | length) > 0' >/dev/null <<<"$out" \
+    || { fail "$name (a missing PR should be a note, not a failure)"; return; }
+
+  # --no-profile skips the whole audience half.
+  out="$(PATH="$d/bin:$PATH" "$recon" --base main --no-profile)" || { fail "$name (--no-profile failed)"; return; }
+  jq -e '.reviewers == {"profiled": false}' >/dev/null <<<"$out" \
+    || { fail "$name (--no-profile still profiled)"; return; }
+
+  # Without a usable gh, the local facts still land and the gap is a note.
+  touch "$FIXTURES/down"
+  out="$(PATH="$d/bin:$PATH" "$recon" --base main)" || { fail "$name (failed without gh)"; return; }
+  check="$(jq -r '[(.haveGh|tostring), (.diff.files|tostring), (.pr|tostring),
+                   ((.notes | map(select(test("gh is missing"))) | length)|tostring)] | join(",")' <<<"$out")"
+  [ "$check" = "false,5,null,1" ] || { fail "$name (degraded mode wrong: $check)"; return; }
+  rm "$FIXTURES/down"
+
+  # A dirty worktree is reported, so the skill can say what will not be in the PR.
+  echo "scratch" >"$d/repo/notes.txt"
+  out="$(PATH="$d/bin:$PATH" "$recon" --base main)"
+  jq -e '.worktree.dirty and .worktree.untracked == 1' >/dev/null <<<"$out" \
+    || { fail "$name (uncommitted work not reported)"; return; }
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
 # Sandbox for the scripts bundled with the ssh-teleport skill: a throwaway $HOME
 # holding one fake Claude Code session (transcript, subagent transcript, tool
 # result, file history, tasks, plan file) plus a throwaway git repo with an
@@ -1008,6 +1140,7 @@ test_install_dry_run
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape
+test_pr_recon_shape
 test_ssh_teleport_encodes_paths
 test_ssh_teleport_rewrites_transcript
 test_ssh_teleport_probe_parses_target
