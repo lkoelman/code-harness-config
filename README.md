@@ -1,6 +1,19 @@
 # Code Harness Config
 
-Skills and agent definitions shared across coding agent harnesses (Claude Code, Codex CLI, Gemini CLI, OpenCode, pi-agent), maintained once and installed per harness.
+**Write a skill once, run it in every coding agent you use.** Claude Code, Codex CLI, Gemini CLI, OpenCode and pi-agent each want their own config directory and their own frontmatter dialect — so the same prompt ends up copy-pasted five times and drifts in four of them. This repo keeps one canonical copy of each skill and agent, splices in whatever per-harness metadata is needed at build time, and symlinks the result into place. Edit the source, re-run `install.sh`, and every harness is up to date.
+
+## Skills
+
+| Skill | What it does |
+|---|---|
+| [`autofix-pr-local`](skills/autofix-pr-local/SKILL.md) | Shepherds an open PR to green from your machine: loops over failing CI checks, reviewer and bot comments, and base-branch conflicts, fixing the highest-priority signal and committing one fix per issue. |
+| [`grill-for-pr`](skills/grill-for-pr/SKILL.md) | Interviews you for the context a diff can't show, then writes a PR title and description engineered for reviewer buy-in — honest, persuasive, and short enough to actually get read. |
+| [`github-cli`](skills/github-cli/SKILL.md) | House rules for driving issues, pull requests and review threads through `gh` instead of ad hoc API calls or web fetches. |
+| [`remote-git-examples`](skills/remote-git-examples/SKILL.md) | Inspect code behind a GitHub (or any remote git) URL by shallow-cloning it to a temp dir rather than scraping the web UI. |
+| [`ssh-teleport`](skills/ssh-teleport/SKILL.md) | Moves the current Claude Code session to another machine — transcript, tool results, plan, file history and working tree — landing in a fresh worktree there. `--summary` sends the code plus a written handoff instead, for a teammate or a fresh session. |
+| [`document-architecture`](skills/document-architecture/SKILL.md) | Generates an `ARCHITECTURE.md` for an existing codebase, written as an onboarding entry point for both new developers and coding agents. |
+
+Agent definitions live alongside them in [`agents/`](agents/): `autoplan`, `github-orchestrator-agent`, `github-worker-agent`, `planner-codex`, `plan-writer` and `search-grounding`.
 
 ## Layout
 
@@ -99,3 +112,10 @@ Uninstall only ever removes symlinks that resolve back into this repo; it never 
                      # plus the autofix-pr-local scripts against a mock `gh`
 ./scripts/build.sh    # build without installing, e.g. to inspect build/<harness>/...
 ```
+
+## Other useful skills
+
+Skill collections worth borrowing from — install them alongside this repo's, or read them for the patterns:
+
+- [mattpocock/skills](https://github.com/mattpocock/skills) — a broad, actively curated set of general-purpose agent skills.
+- [Fission-AI/openspec](https://github.com/Fission-AI/openspec) — spec-driven development for coding agents: agree on the spec before any code is written, so the agent builds what you actually asked for.
