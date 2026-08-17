@@ -1,6 +1,6 @@
 ---
 name: grill-for-pr
-description: Interview the user to surface the context a diff cannot show, then write a pull request title and description engineered for reviewer buy-in — persuasive, honest, and sized to actually be read. Use before opening a PR, when rewriting the description of a PR that has stalled or been ignored, and whenever the user says "write my PR description", "open a PR for this", "make the case for this change", "nobody is reviewing my PR", "how do I get this approved", "grill me for a PR", or asks for help making a change easier for a reviewer to say yes to.
+description: Interview the user to surface the context a diff cannot show, then write a pull request title and description engineered for reviewer buy-in — persuasive, honest, and sized to actually be read. Use when explicitly asked to use this skill or when the user asks "grill me for a PR", or asks for help making a change easier for a reviewer to say yes to.
 argument-hint: [--pr <n>] [--base <branch>] [--quick] [--rounds <N>] [--draft-only] [--no-profile]
 ---
 
