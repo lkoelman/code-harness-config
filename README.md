@@ -12,6 +12,7 @@
 | [`remote-git-examples`](skills/remote-git-examples/SKILL.md) | Inspect code behind a GitHub (or any remote git) URL by shallow-cloning it to a temp dir rather than scraping the web UI. |
 | [`ssh-teleport`](skills/ssh-teleport/SKILL.md) | Moves the current Claude Code session to another machine — transcript, tool results, plan, file history and working tree — landing in a fresh worktree there. `--summary` sends the code plus a written handoff instead, for a teammate or a fresh session. |
 | [`document-architecture`](skills/document-architecture/SKILL.md) | Generates an `ARCHITECTURE.md` for an existing codebase, written as an onboarding entry point for both new developers and coding agents. |
+| [`handoff-doc`](skills/handoff-doc/SKILL.md) | Write handoff document so you can /clear or /compact the context window and the next agent can continue the session. |
 
 Agent definitions live alongside them in [`agents/`](agents/): `autoplan`, `github-orchestrator-agent`, `github-worker-agent`, `planner-codex`, `plan-writer` and `search-grounding`.
 
@@ -119,3 +120,5 @@ Skill collections worth borrowing from — install them alongside this repo's, o
 
 - [mattpocock/skills](https://github.com/mattpocock/skills) — a broad, actively curated set of general-purpose agent skills.
 - [Fission-AI/openspec](https://github.com/Fission-AI/openspec) — spec-driven development for coding agents: agree on the spec before any code is written, so the agent builds what you actually asked for.
+- [ykdojo/claude-code-tips](https://github.com/ykdojo/claude-code-tips) - tips akd skills for getting the most out of claude code
+- [sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline) - Claude statusline customizer with Cache hot/cold timer
