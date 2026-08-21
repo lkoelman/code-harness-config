@@ -76,7 +76,8 @@ Abort if there is no open PR, or if the worktree is dirty — uncommitted work w
    - **Failing check** — `gh run view <runId> --log-failed`, read the failing step, reproduce locally where the repo allows, fix, re-run that local command. Then `pr-state.sh signature <check> "<failing step + first distinctive error line>"`. **Exit 3 means the check failed the same way as last time**: the fix did not work, so stop working that check and move on rather than spending the rest of the budget on it.
    - **Review comment** — read the whole thread first; a later comment often supersedes an earlier one. Assess whether the comment is valid and within scope.
    - **Write fix** - Make the smallest change that genuinely addresses the point. `pr-state.sh thread-seen <id>` first to skip anything already handled.
-5. Commit (below), record it with `pr-state.sh commit <sha> "<what it fixed>"`, and push if the mode says so.
+5. Commit (below), record it with `pr-state.sh commit <sha> "<what it fixed>"`. Only push after committing each fix and if the mode says so.
+6. Once all queued items are addressed and committed, push all commits together. Don't push commits individually: prevent triggering a new review cycle before all fixes are pushed.
 6. Wait for the PR to change — see `references/waiting.md`, which covers both the background-monitor and foreground-polling branches.
 
 ## Commit discipline
