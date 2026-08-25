@@ -1,0 +1,102 @@
+# Candidate patterns for find-slop.sh. Format: <category>|<extended regex>
+# Matching is case-insensitive. One pattern per line; '#' starts a comment.
+#
+# These patterns LOCATE candidates, they do not judge them. Every hit needs a
+# human or model decision, because the same word is slop in prose and correct
+# in code: `surface` is a metaphor in a design document and a legitimate
+# identifier in a graphics library. Expect false positives and triage them.
+#
+# Categories map to the directives in harnesses/claude/CLAUDE.md:
+#   metaphor     NAME THE MECHANISM, NOT A METAPHOR
+#   unqualified  QUALIFY ALL TERMS
+#   relational   CONTEXTUALIZE RELATIONAL JARGON
+#   unmeasurable claims a reader cannot check (NASA Appendix C list)
+#   filler       words that occupy the position a claim should occupy
+#   contrast     false-contrast constructions that assert instead of stating
+
+# --- metaphor: a physical image standing in for a code construct -----------
+metaphor|load[- ]bearing
+metaphor|blast radius
+metaphor|footgun
+metaphor|\bwedges?\b
+metaphor|\bshims?\b
+metaphor|drop-in
+metaphor|\bseams?\b
+metaphor|\bspine\b
+metaphor|substrate
+metaphor|surface area
+metaphor|escape hatch
+metaphor|the (glue|plumbing|scaffolding)
+metaphor|shape of (the|this|that|a)
+metaphor|\blives (in|on|at|under|inside)\b
+metaphor|surfaces? (an?|the) (error|warning|issue|problem|failure)
+metaphor|paper(s|ed)? over
+metaphor|bake[sd]? in\b
+metaphor|(that|this) is the tell\b
+metaphor|moving parts
+metaphor|guard ?rails?
+metaphor|north star
+metaphor|pressure[- ]test
+metaphor|source of truth
+metaphor|\bhardening\b
+metaphor|first[- ]class citizen
+
+# --- unqualified: a bare ambiguous noun with no qualifier ------------------
+# These fire only on the bare form: "the update window" does not match.
+unqualified|\bthe (window|hook|gate|payload|client|state|config|store|context|buffer|handler|wrapper|adapter|layer|pipeline|flow)\b
+unqualified|\b(this|these|that|those) (breaks?|fixes|causes?|means?|is|are|was|were) \b
+
+# --- relational: jargon that needs the other end of the relationship -------
+relational|tightly coupled
+relational|loosely coupled
+relational|\bbottleneck\b
+relational|backwards? compatible
+relational|\borthogonal\b
+relational|\bidiomatic\b
+
+# --- unmeasurable: a claim with no value behind it (NASA Appendix C) -------
+unmeasurable|\brobust\b
+unmeasurable|\bseamless(ly)?\b
+unmeasurable|\bcomprehensive(ly)?\b
+unmeasurable|\bholistic\b
+unmeasurable|\bintricate\b
+unmeasurable|\badequate(ly)?\b
+unmeasurable|\bsufficient(ly)?\b
+unmeasurable|\bflexible\b
+unmeasurable|user[- ]friendly
+unmeasurable|non[- ]trivial
+unmeasurable|\bsignificant(ly)?\b
+unmeasurable|\bsimply\b
+unmeasurable|\beasily\b
+unmeasurable|\bquickly\b
+unmeasurable|\bclearly\b
+unmeasurable|\bas appropriate\b
+unmeasurable|\betc\.
+unmeasurable|and/or
+unmeasurable|but not limited to
+unmeasurable|\b(minimize|maximize)\b
+unmeasurable|\blightweight\b
+
+# --- filler: occupies the position a claim should occupy -------------------
+filler|it'?s worth noting
+filler|it'?s important to note
+filler|worth mentioning
+filler|at its core
+filler|when it comes to
+filler|at the end of the day
+filler|here'?s where it gets
+filler|let'?s (break (this|it) down|dive in)
+filler|\bdelve\b
+filler|\bunpack\b
+filler|double[- ]click on
+filler|\bleverage\b
+filler|lean in(to)?\b
+filler|needless to say
+filler|it goes without saying
+
+# --- contrast: asserts a contrast instead of stating the fact --------------
+contrast|is ?n'?t just .*it'?s
+contrast|not just .*,? but
+contrast|is ?n'?t about .*it'?s about
+contrast|is ?n'?t (a|an|the|about) [^,]*, ?it'?s
+contrast|no [a-z]+\. no [a-z]+\. just
