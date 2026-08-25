@@ -142,6 +142,7 @@ for h in "${TARGETS[@]}"; do
   SKILLS_DIR=""
   AGENTS_DIR=""
   SETTINGS_DEST=""
+  CLAUDE_MD_DEST=""
   # shellcheck disable=SC1090
   source "$HARNESSES_DIR/$h.conf"
 
@@ -171,6 +172,10 @@ for h in "${TARGETS[@]}"; do
 
   if [ -n "$SETTINGS_DEST" ] && [ -f "$HARNESSES_DIR/$h/settings.json" ]; then
     link_item "$HARNESSES_DIR/$h/settings.json" "$SETTINGS_DEST" "settings $h"
+  fi
+
+  if [ -n "$CLAUDE_MD_DEST" ] && [ -f "$HARNESSES_DIR/$h/CLAUDE.md" ]; then
+    link_item "$HARNESSES_DIR/$h/CLAUDE.md" "$CLAUDE_MD_DEST" "CLAUDE.md $h"
   fi
 done
 

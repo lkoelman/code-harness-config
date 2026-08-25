@@ -23,6 +23,7 @@ skills/<name>/SKILL.md               # one skill, shared across every harness
 agents/<name>/AGENT.md               # one agent definition, shared across every harness
 harnesses/<harness>.conf             # where each harness's skills/agents/settings live
 harnesses/pi-agent/settings.json     # pi-agent's settings.json, symlinked in on install
+harnesses/claude/CLAUDE.md           # Claude Code's global CLAUDE.md, symlinked in on install
 scripts/install-prerequisites.sh     # installs gh, jq and the gh extensions the skills need
 scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
 scripts/install.sh                   # builds, then symlinks into each harness's config dir
@@ -64,7 +65,7 @@ This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks ea
 
 | Harness | Skills | Agents | Notes |
 |---|---|---|---|
-| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. |
+| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. Also symlinks `harnesses/claude/CLAUDE.md` to `~/.claude/CLAUDE.md` (the global instructions applied to every session). |
 | Codex CLI | `~/.codex/skills/<name>` | — | Codex doesn't support markdown subagent definitions. |
 | Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | Run `/skills reload` after installing/updating. |
 | OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | Native path, not `~/.opencode/`. |
@@ -82,6 +83,10 @@ To remove everything this repo installed for a harness:
 ```
 
 Uninstall only ever removes symlinks that resolve back into this repo; it never touches real files.
+
+## Global instructions (`CLAUDE.md`)
+
+`harnesses/claude/CLAUDE.md` is Claude Code's global instructions file, applied to every session — it's a single real file, not a per-name directory, and (unlike skills/agents) isn't spliced with any per-harness frontmatter, since only Claude Code reads it. Edit it directly and re-run `./scripts/install.sh claude` to symlink the update into `~/.claude/CLAUDE.md`.
 
 ## Adding or editing a skill
 

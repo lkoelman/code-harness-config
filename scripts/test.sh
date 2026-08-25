@@ -49,6 +49,19 @@ AGENTS_DIR=""
 EOF
 }
 
+# alpha.conf with a CLAUDE_MD_DEST, plus the harnesses/alpha/CLAUDE.md fixture
+# it points at (mirrors the pi-agent settings.json pattern).
+write_alpha_conf_with_claude_md() {
+  local sandbox="$1"
+  cat >"$sandbox/harnesses/alpha.conf" <<'EOF'
+SKILLS_DIR="$HOME/.alpha/skills"
+AGENTS_DIR="$HOME/.alpha/agents"
+CLAUDE_MD_DEST="$HOME/CLAUDE.md"
+EOF
+  mkdir -p "$sandbox/harnesses/alpha"
+  echo "alpha global instructions" >"$sandbox/harnesses/alpha/CLAUDE.md"
+}
+
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough() {
   local name="build: splices frontmatter, preserves body, copies supporting files"
@@ -373,6 +386,67 @@ EOF
     fail "$name (dry-run created files under HOME)"; return
   fi
   [ -f "$sandbox/build/alpha/skills/widget/SKILL.md" ] || { fail "$name (dry-run should still (re)build)"; return; }
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_claude_md_symlink() {
+  local name="install/uninstall: CLAUDE_MD_DEST symlinks harnesses/<h>/CLAUDE.md, idempotent"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_conf_with_claude_md "$sandbox"
+
+  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
+  fi
+
+  local dest="$fake_home/CLAUDE.md"
+  [ -L "$dest" ] || { fail "$name (CLAUDE.md symlink not created)"; return; }
+  [ "$(readlink -f "$dest")" = "$(readlink -f "$sandbox/harnesses/alpha/CLAUDE.md")" ] \
+    || { fail "$name (CLAUDE.md symlink target wrong)"; return; }
+  [ "$(cat "$dest")" = "alpha global instructions" ] || { fail "$name (CLAUDE.md content wrong)"; return; }
+
+  # reinstall is idempotent
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install2.log" 2>&1; then
+    fail "$name (reinstall exited nonzero)"; cat "$sandbox/install2.log"; return
+  fi
+  [ -L "$dest" ] || { fail "$name (CLAUDE.md symlink gone after reinstall)"; return; }
+
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha >"$sandbox/uninstall.log" 2>&1; then
+    fail "$name (uninstall.sh exited nonzero)"; cat "$sandbox/uninstall.log"; return
+  fi
+  [ -e "$dest" ] && { fail "$name (CLAUDE.md symlink still present after uninstall)"; return; }
+
+  # uninstalling again is a harmless no-op
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha >"$sandbox/uninstall2.log" 2>&1; then
+    fail "$name (second uninstall exited nonzero)"; cat "$sandbox/uninstall2.log"; return
+  fi
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_claude_md_guardrail_and_force() {
+  local name="install: refuses to clobber a real CLAUDE.md without --force, backs it up with --force"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_conf_with_claude_md "$sandbox"
+
+  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  echo "keep-me" >"$fake_home/CLAUDE.md"
+
+  if HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh should have refused without --force)"; return
+  fi
+  [ "$(cat "$fake_home/CLAUDE.md")" = "keep-me" ] || { fail "$name (real file destroyed without --force)"; return; }
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --force >"$sandbox/install-force.log" 2>&1; then
+    fail "$name (install.sh --force should have succeeded)"; cat "$sandbox/install-force.log"; return
+  fi
+  [ -L "$fake_home/CLAUDE.md" ] || { fail "$name (target not a symlink after --force)"; return; }
+  [ -f "$fake_home/CLAUDE.md.bak" ] || { fail "$name (no backup of clobbered real file found)"; return; }
+  [ "$(cat "$fake_home/CLAUDE.md.bak")" = "keep-me" ] || { fail "$name (backup missing original content)"; return; }
 
   pass "$name"
 }
@@ -1144,6 +1218,8 @@ test_lint_missing_header_for_targeted_harness
 test_install_uninstall_idempotent
 test_install_guardrail_and_force
 test_install_dry_run
+test_install_claude_md_symlink
+test_install_claude_md_guardrail_and_force
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape

@@ -65,6 +65,7 @@ for h in "${TARGETS[@]}"; do
   SKILLS_DIR=""
   AGENTS_DIR=""
   SETTINGS_DEST=""
+  CLAUDE_MD_DEST=""
   # shellcheck disable=SC1090
   source "$HARNESSES_DIR/$h.conf"
 
@@ -77,6 +78,16 @@ for h in "${TARGETS[@]}"; do
       "$REPO/"*)
         rm -f "$SETTINGS_DEST"
         echo "removed $SETTINGS_DEST"
+        ;;
+    esac
+  fi
+
+  if [ -n "$CLAUDE_MD_DEST" ] && [ -L "$CLAUDE_MD_DEST" ]; then
+    raw="$(readlink "$CLAUDE_MD_DEST")"
+    case "$raw" in
+      "$REPO/"*)
+        rm -f "$CLAUDE_MD_DEST"
+        echo "removed $CLAUDE_MD_DEST"
         ;;
     esac
   fi
