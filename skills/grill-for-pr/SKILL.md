@@ -8,7 +8,7 @@ argument-hint: [--pr <n>] [--base <branch>] [--quick] [--rounds <N>] [--draft-on
 
 Use this skill when a change needs a **case made for it**: a PR about to be opened, or an open PR whose description is failing to get it reviewed. A reviewer approving a PR is a decision made by a person under time pressure, and the description is the only lever the author has on that decision. This skill pulls the deciding context out of the author's head — why now, what was tried and rejected, what they are least sure about — and arranges it so the reviewer can say yes quickly and safely.
 
-Two halves, and both are load-bearing: an interview modelled on the `grilling` skill, then a draft arranged using influence principles (Carnegie, Voss) and code-review cognitive-load practice.
+The skill has two halves and needs both: an interview modelled on the `grilling` skill, then a draft arranged using influence principles (Carnegie, Voss) and code-review cognitive-load practice.
 
 Not for reviewing someone else's PR, not for fixing a red PR (`autofix-pr-local`), not for the mechanics of opening one (`github-cli`). If the user wants a bare summary of the diff and nothing more, write it directly — the interview is a cost, and it only pays back when there is a decision to influence.
 

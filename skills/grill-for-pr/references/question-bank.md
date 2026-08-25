@@ -89,7 +89,7 @@ Voss's unknown unknowns: the fact that reframes everything. Ask two or three, ph
 - **Is there history in this file** — a rewrite that stalled, a rollback, an outage?
 - **Is anyone else about to touch this code?** A conflict the reviewer knows about and you do not turns approval into resistance.
 - **Is there a constraint you are treating as fixed that is not written down anywhere** — a customer promise, a compliance rule, a vendor limit?
-- **Is anything here load-bearing for someone else's deadline?**
+- **Is someone else's deadline waiting on this change?**
 
 ## By change type
 

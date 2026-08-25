@@ -31,7 +31,7 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
 json_or() {
   # Echo stdin if it parses as JSON, else the fallback. gh exits non-zero for
   # pending/failing checks and prints prose when a PR has no checks at all.
-  # The -n test is load-bearing: `jq -e .` exits 0 on empty input.
+  # The -n test is required here: `jq -e .` exits 0 on empty input.
   local fallback="$1" input
   input="$(cat)"
   if [ -n "$input" ] && jq -e . >/dev/null 2>&1 <<<"$input"; then
