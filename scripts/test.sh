@@ -1208,75 +1208,6 @@ test_ssh_teleport_remote_setup_check_repo() {
   pass "$name"
 }
 
-test_unslop_find_slop() {
-  local name="skill unslop: find-slop.sh locates candidates by category and scans a diff"
-  local finder="$REPO/skills/unslop/scripts/find-slop.sh"
-  local d; d="$(mktemp -d)"; SANDBOXES+=("$d")
-
-  cat >"$d/doc.md" <<'EOF'
-The retry logic is load-bearing.
-This is a robust and seamless solution.
-The hook fires before the gate.
-It's worth noting that the blast radius is small.
-This isn't a config problem, it's a stale cache.
-Removing refreshToken() signs every user out after one hour.
-EOF
-  printf '/* This shim is load-bearing. */\nint surface_area = 3;\n' >"$d/code.c"
-
-  local out
-  out="$("$finder" "$d/doc.md")" || { fail "$name (exited nonzero on a file with hits)"; return; }
-
-  # One representative hit per category, each on the right line.
-  local want
-  for want in "1:metaphor:load-bearing" "2:unmeasurable:robust" "3:unqualified:the gate" \
-              "4:filler:It's worth noting" "5:contrast:isn't a config problem, it's"; do
-    grep -qF "doc.md:$want" <<<"$out" || { fail "$name (missing hit $want)"; return; }
-  done
-
-  # The last sentence names its mechanism, so it must produce no hits.
-  if grep -q "doc.md:6:" <<<"$out"; then fail "$name (flagged a clean line)"; return; fi
-
-  # --category narrows, --count summarises, --exclude drops a path.
-  [ "$("$finder" --category metaphor "$d/doc.md" | wc -l)" -eq 2 ] \
-    || { fail "$name (--category metaphor should return 2 hits)"; return; }
-  grep -qE '^metaphor +2$' <<<"$("$finder" --count "$d/doc.md")" \
-    || { fail "$name (--count metaphor tally wrong)"; return; }
-  [ -z "$("$finder" --exclude doc.md "$d/doc.md")" ] \
-    || { fail "$name (--exclude did not drop the path)"; return; }
-
-  # --prose-only skips code.c; the default mode scans it.
-  if "$finder" --prose-only "$d" | grep -q "code.c"; then
-    fail "$name (--prose-only scanned a .c file)"; return
-  fi
-  "$finder" "$d" | grep -q "code.c:1:metaphor:load-bearing" \
-    || { fail "$name (default mode should scan code.c)"; return; }
-
-  # A file with no candidates exits 1 and prints nothing.
-  echo "The scheduler retries the job three times." >"$d/clean.md"
-  local clean_out rc
-  clean_out="$("$finder" "$d/clean.md")"; rc=$?
-  [ "$rc" -eq 1 ] || { fail "$name (a clean file should exit 1, got $rc)"; return; }
-  [ -z "$clean_out" ] || { fail "$name (a clean file should print nothing)"; return; }
-
-  # --diff reports only added lines, with real file line numbers.
-  git init -q "$d/repo" || { fail "$name (git init failed)"; return; }
-  cd "$d/repo" || { fail "$name (cd failed)"; return; }
-  git config user.email t@t.t && git config user.name t
-  echo "The scheduler retries the job." >a.md
-  git add a.md && git commit -qm init
-  printf 'The scheduler retries the job.\nThis is load-bearing and robust.\n' >a.md
-  local diff_out
-  diff_out="$("$finder" --diff HEAD)" || { fail "$name (--diff exited nonzero)"; return; }
-  grep -qF "a.md:2:metaphor:load-bearing" <<<"$diff_out" \
-    || { fail "$name (--diff missed the added line: $diff_out)"; return; }
-  if grep -q "a.md:1:" <<<"$diff_out"; then
-    fail "$name (--diff reported an unchanged line)"; return
-  fi
-
-  cd "$REPO" || true
-  pass "$name"
-}
-
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough
 test_harnesses_targeting
@@ -1298,7 +1229,6 @@ test_ssh_teleport_rewrites_transcript
 test_ssh_teleport_probe_parses_target
 test_ssh_teleport_remote_setup_worktree
 test_ssh_teleport_remote_setup_check_repo
-test_unslop_find_slop
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

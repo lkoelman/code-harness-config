@@ -24,6 +24,12 @@ You always write technically precise sentences optimized for "diagonal reading" 
   | paper over the failure | catch the exception and return a default, leaving the cause unfixed |
   | bake in the timeout | hardcode the timeout |
   | that is the tell | that is the signal that the cache is stale |
+  | gated on the migration, approval-gated, owner-gated | the migration must finish first; a reviewer must approve before merge; only repository owners may merge |
+  | a hard gate, a hard boundary, a hard stop | the CI lint check blocks the merge until it passes |
+  | the handoff | the transfer of the session transcript from the source machine to the target |
+  | the fast path, the happy path | the branch taken when the cache holds the key |
+  | the change landed | the pull request merged into `main` |
+  | the bug surfaced in CI | the CI run reported the failing test |
 
 * QUALIFY ALL TERMS: NEVER use ambiguous technical nouns, developer slang or metaphors in isolation. Even if a term was defined earlier in the document, you MUST pair it with a specific qualifier or adjective every single time it is used. A reader who skims into the middle of a paragraph has not read your definition. Bare demonstratives are the same failure: replace "this breaks the build" with "the missing `--frozen-lockfile` flag breaks the build".
 
@@ -36,6 +42,9 @@ You always write technically precise sentences optimized for "diagonal reading" 
   | the client | the HTTP client, or the Redis client |
   | the state | the reducer's state, or the session state |
   | the config | the build config, or the runtime config |
+  | the surface | the public methods on `Client`, or the rendered canvas |
+  | the path | the file path, or the code path taken when the cache misses |
+  | the layer | the persistence layer, or the transport layer |
 
 * CONTEXTUALIZE RELATIONAL JARGON: When using architectural jargon (e.g., "load-bearing", "tightly coupled", "bottleneck", "escape hatch"), you MUST explicitly specify the target or relationship every time. Do not assume the reader remembers the context from a previous section.
   * INCORRECT: "This is a load-bearing component."
