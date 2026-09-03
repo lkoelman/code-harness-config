@@ -14,6 +14,8 @@
 | [`document-architecture`](skills/document-architecture/SKILL.md) | Generates an `ARCHITECTURE.md` for an existing codebase, written as an onboarding entry point for both new developers and coding agents. |
 | [`handoff-doc`](skills/handoff-doc/SKILL.md) | Write handoff document so you can /clear or /compact the context window and the next agent can continue the session. |
 | [`unslop`](skills/unslop/SKILL.md) | Rewrites existing text to name mechanisms instead of metaphors, qualify ambiguous technical nouns, and replace unmeasurable claims with values. Sources every rewrite from the code rather than inventing a mechanism it cannot verify. |
+| [`terse-precise`](skills/terse-precise/SKILL.md) | Writes or rewrites text to the terse, technically precise standard optimized for skimming: name the file, function, condition and effect instead of a metaphor, qualify every ambiguous technical noun, and state both ends of relational jargon. |
+| [`claudish-to-english`](skills/claudish-to-english/SKILL.md) | Paraphrases Claude's characteristic prose — contrast-heavy, metaphorical, restatement-prone — into plain English, collapsing repeated propositions and lowering the abstraction level while preserving every fact and logical scope. |
 
 Agent definitions live alongside them in [`agents/`](agents/): `autoplan`, `github-orchestrator-agent`, `github-worker-agent`, `planner-codex`, `plan-writer` and `search-grounding`.
 
@@ -24,7 +26,6 @@ skills/<name>/SKILL.md               # one skill, shared across every harness
 agents/<name>/AGENT.md               # one agent definition, shared across every harness
 harnesses/<harness>.conf             # where each harness's skills/agents/settings live
 harnesses/pi-agent/settings.json     # pi-agent's settings.json, symlinked in on install
-harnesses/claude/CLAUDE.md           # Claude Code's global CLAUDE.md, symlinked in on install
 scripts/install-prerequisites.sh     # installs gh, jq and the gh extensions the skills need
 scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
 scripts/install.sh                   # builds, then symlinks into each harness's config dir
@@ -66,7 +67,7 @@ This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks ea
 
 | Harness | Skills | Agents | Notes |
 |---|---|---|---|
-| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. Also symlinks `harnesses/claude/CLAUDE.md` to `~/.claude/CLAUDE.md` (the global instructions applied to every session). |
+| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. |
 | Codex CLI | `~/.codex/skills/<name>` | — | Codex doesn't support markdown subagent definitions. |
 | Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | Run `/skills reload` after installing/updating. |
 | OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | Native path, not `~/.opencode/`. |
@@ -87,7 +88,7 @@ Uninstall only ever removes symlinks that resolve back into this repo; it never 
 
 ## Global instructions (`CLAUDE.md`)
 
-`harnesses/claude/CLAUDE.md` is Claude Code's global instructions file, applied to every session — it's a single real file, not a per-name directory, and (unlike skills/agents) isn't spliced with any per-harness frontmatter, since only Claude Code reads it. Edit it directly and re-run `./scripts/install.sh claude` to symlink the update into `~/.claude/CLAUDE.md`.
+`scripts/install.sh` symlinks `harnesses/<harness>/CLAUDE.md` to the `CLAUDE_MD_DEST` that harness's `.conf` declares (`~/.claude/CLAUDE.md` for Claude Code) — a single real file, not a per-name directory, and (unlike skills/agents) not spliced with any per-harness frontmatter. No harness ships one right now: the writing-style directives that used to live in `harnesses/claude/CLAUDE.md` are now the [`terse-precise`](skills/terse-precise/SKILL.md) skill, invoked per request instead of applied to every session. Add the file back and re-run `./scripts/install.sh claude` to restore the symlink.
 
 ## Adding or editing a skill
 

@@ -65,8 +65,8 @@ mechanism can carry better.
 
 ## Rewrite catalog
 
-Four categories. The first three mirror the directives in `harnesses/claude/CLAUDE.md`;
-`unmeasurable` carries a rule the global directives leave out, so it applies only when this
+Four categories. The first three mirror the directives in `skills/terse-precise/SKILL.md`;
+`unmeasurable` carries a rule those directives leave out, so it applies only when this
 skill runs.
 
 Every replacement below is an example of a shape, not a substitution to paste. Take the actual
@@ -187,3 +187,4 @@ under 200 ms", not "minimize latency".
 
 `document-architecture` writes an `ARCHITECTURE.md`; run this skill over the result.
 `grill-for-pr` drafts a pull request description; run this skill over the draft before posting.
+`terse-precise` writes new text to the standard this skill repairs text to.

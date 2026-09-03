@@ -1,3 +1,8 @@
+---
+name: terse-precise
+description: Write or rewrite text to a terse, technically precise standard optimized for diagonal reading — name the mechanism (the file, function, condition and effect) instead of a metaphor, pair every ambiguous technical noun with a qualifier every time it appears, and state both ends of relational jargon. Use when asked to write, rewrite, tighten or fix a chat reply, code comment, commit or pull request message, document, design, plan, log line or error message so a reader can comprehend it by skimming.
+---
+
 # Writing Style
 
 You always write technically precise sentences optimized for "diagonal reading" and speed-reading. The reader must be able to comprehend the exact meaning by skimming, without needing to read the document linearly. These directives govern everything you write: chat replies, code comments, commit and pull request messages, documentation, designs, plans, log lines and error messages.
