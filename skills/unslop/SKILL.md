@@ -6,9 +6,7 @@ argument-hint: [<path>...] [--diff [<base>]]
 
 ## When to use me
 
-Use this skill to repair text that already exists. The directives in `~/.claude/CLAUDE.md`
-govern text as it is written. This skill finds and fixes text written without them: text from
-another author, from an earlier session, or from before the directives existed.
+Use this skill to repair text that already exists.
 
 Requests that mean this skill: "unslop this README", "strip the jargon out of these comments",
 "make this design document skimmable", "check my diff before I commit".
@@ -182,7 +180,7 @@ under 200 ms", not "minimize latency".
 - **Text where the vague word is the honest answer.** "Roughly 200 ms" is correct when the
   measurement varies. Precision means matching the claim to what is known, not inventing a
   decimal place.
-- **Files that list banned terms on purpose**, such as `harnesses/claude/CLAUDE.md` and the
+- **Files that list banned terms on purpose**, such as agent instructions and the
   catalog above. Every term in an "Instead of" column is there to be named, not fixed.
 
 ## Related skills
