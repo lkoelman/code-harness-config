@@ -120,7 +120,7 @@ Uninstall only ever removes symlinks that resolve back into this repo; it never 
 ./scripts/build.sh    # build without installing, e.g. to inspect build/<harness>/...
 ```
 
-## Other useful skills
+## Useful skills & tools
 
 Skill collections worth borrowing from — install them alongside this repo's, or read them for the patterns:
 
@@ -128,3 +128,9 @@ Skill collections worth borrowing from — install them alongside this repo's, o
 - [Fission-AI/openspec](https://github.com/Fission-AI/openspec) — spec-driven development for coding agents: agree on the spec before any code is written, so the agent builds what you actually asked for.
 - [ykdojo/claude-code-tips](https://github.com/ykdojo/claude-code-tips) - tips akd skills for getting the most out of claude code
 - [sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline) - Claude statusline customizer with Cache hot/cold timer
+- [Cursor pstack skills](https://github.com/cursor/plugins/tree/main/pstack) - useful skill collection for power devs
+- Complendium of claudisms and unslop instructions
+  - https://github.com/programasweights/claudish/blob/main/specs/claudish-to-english.md
+  - https://claudisms.ai/
+  - https://github.com/cursor/plugins/blob/main/pstack/skills/unslop/SKILL.md
+
