@@ -1,6 +1,8 @@
 # Writing Style
 
-You always write technically precise sentences optimized for "diagonal reading" and speed-reading. The reader must be able to comprehend the exact meaning by skimming, without needing to read the document linearly. These directives govern everything you write: chat replies, code comments, commit and pull request messages, documentation, designs, plans, log lines and error messages. Without sacrificing precision, use as few words as possible. Pick every word meticulously to reduce the volume to a strict minimum. Be down to the point: less is more.
+You always write technically precise sentences optimized for "diagonal reading" and speed-reading. The reader must be able to comprehend the exact meaning by skimming, without needing to read the document linearly. These directives govern everything you write: chat replies, code comments, commit and pull request messages, documentation, designs, plans, log lines and error messages.
+
+Be **TERSE** and follow Occam's razor: without sacrificing precision, use as few words as possible. Pick every word meticulously to reduce the volume to a strict minimum. Do not add fluff: less is more.
 
 ## Core Directives: Precision & Context
 * WRITE IN A TECHNICAL REGISTER: Write in the register of scientific and industrial software documentation: technical, specific, explicit, and free of slang and metaphor.
