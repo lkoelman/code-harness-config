@@ -601,9 +601,11 @@ EOF
 {"number":12,"state":"OPEN","baseRefName":"main","headRefName":"feat","url":"https://github.com/owner/repo/pull/12",
  "isDraft":false,"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","reviews":[],"comments":[]}
 EOF
+  # Two adjacent arrays, not one: that is what `gh api --paginate` emits per its
+  # documented contract, and it must survive the collector without a 3 MB fixture.
   cat >"$FIXTURES/comments.json" <<'EOF'
-[{"id":1,"user":{"login":"coderabbitai[bot]","type":"Bot"},"path":"a.py","body":"nit"},
- {"id":2,"user":{"login":"alice","type":"User"},"path":"b.py","body":"please rename"}]
+[{"id":1,"user":{"login":"coderabbitai[bot]","type":"Bot"},"path":"a.py","body":"nit"}]
+[{"id":2,"user":{"login":"alice","type":"User"},"path":"b.py","body":"please rename"}]
 EOF
   cat >"$FIXTURES/threads.json" <<'EOF'
 {"reviews":[{"comments":[
@@ -633,6 +635,61 @@ EOF
   out="$(PATH="$d/bin:$PATH" "$sig" --pr 12)" || { fail "$name (failed without gh-pr-review)"; return; }
   check="$(jq -r '[(.havePrReview|tostring), (.counts.unresolvedThreads|tostring), (.counts.failing|tostring)] | join(",")' <<<"$out")"
   [ "$check" = "false,0,2" ] || { fail "$name (degraded mode wrong: $check)"; return; }
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
+test_pr_signals_past_argv_cap() {
+  local name="skill autofix-pr-local: pr-signals.sh survives a review-comment payload past the argv cap"
+  local d; d="$(new_gh_sandbox)"
+  local sig="$REPO/skills/autofix-pr-local/scripts/pr-signals.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  echo '[{"name":"build","bucket":"fail","link":"https://github.com/owner/repo/actions/runs/4242/job/9","workflow":"CI"}]' >"$FIXTURES/checks.json"
+  cat >"$FIXTURES/view.json" <<'EOF'
+{"number":12,"state":"OPEN","baseRefName":"main","headRefName":"feat","url":"https://github.com/owner/repo/pull/12",
+ "isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviews":[],"comments":[]}
+EOF
+  echo '{"reviews":[]}' >"$FIXTURES/threads.json"
+
+  # Two arrays of 1500 comments with 1 KB bodies: ~3 MB. That is past
+  # MAX_ARG_STRLEN (131072, the per-argument kernel cap that broke the old
+  # --argjson call) *and* past ARG_MAX (~2 MB), so no argv transport can carry
+  # it -- including one that split the payload across several arguments. Two
+  # documents also pin the `gh api --paginate` stream shape, which `add`
+  # concatenates and a bare `[0]` would silently truncate to the first page.
+  jq -nc '[range(0;1500)    | {id: ., user: {login: "alice",    type: "User"}, path: "a.py", body: ("x" * 1024)}]'  >"$FIXTURES/comments.json"
+  jq -nc '[range(1500;3000) | {id: ., user: {login: "bot[bot]", type: "Bot"},  path: "b.py", body: ("y" * 1024)}]' >>"$FIXTURES/comments.json"
+
+  local bytes; bytes="$(wc -c <"$FIXTURES/comments.json")"
+  if [ "$bytes" -le 131072 ]; then
+    fail "$name (fixture is only $bytes bytes, no longer past MAX_ARG_STRLEN: it proves nothing)"; return
+  fi
+
+  local out
+  out="$(PATH="$d/bin:$PATH" "$sig" --pr 12)" \
+    || { fail "$name (exited nonzero on a $bytes-byte payload)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (output is not JSON)"; return; }
+
+  # Every comment from both pages survives, bots are still classified, and the
+  # 400-char truncation still runs.
+  local check
+  check="$(jq -r '[(.reviewComments | length | tostring),
+                   (.reviewComments | map(select(.isBot)) | length | tostring),
+                   (.reviewComments | map(.body | length) | max | tostring),
+                   (.counts.failing | tostring)] | join(",")' <<<"$out")"
+  if [ "$check" != "3000,1500,400,1" ]; then
+    fail "$name (large payload mangled: $check)"; return
+  fi
+
+  # Size-independence is a property of the transport, not of this fixture: a
+  # payload that grows with the PR must never be an argv argument again.
+  if grep -qE -- '--argjson (checks|comments|threads) ' "$sig"; then
+    fail "$name (a growable payload is back in argv)"; return
+  fi
 
   cd "$REPO" || true
   unset FIXTURES
@@ -1223,6 +1280,7 @@ test_install_claude_md_guardrail_and_force
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape
+test_pr_signals_past_argv_cap
 test_pr_recon_shape
 test_ssh_teleport_encodes_paths
 test_ssh_teleport_rewrites_transcript

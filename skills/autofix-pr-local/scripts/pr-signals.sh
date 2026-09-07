@@ -61,11 +61,22 @@ fi
 
 # A GitHub App always posts as "<name>[bot]", so the login suffix classifies the
 # author without a hand-maintained list of bot names.
+#
+# The three payloads that grow with the PR arrive on pipes, not in argv. Linux
+# caps a *single* execve argument at MAX_ARG_STRLEN (131072 bytes, a
+# compile-time constant no ulimit raises), independently of the far larger
+# `getconf ARG_MAX` total -- and one PR with 58 review comments already produced
+# 731784 bytes, because each REST review-comment object carries diff_hunk,
+# _links, reactions and user, and bot bodies embed base64 links. So
+# `--argjson comments` failed with "Argument list too long" before jq started,
+# and the 400-char truncation below never got the chance to run. $pr stays an
+# --argjson: its field list is fixed at about a kilobyte, and the sentinel above
+# needs the value in a variable.
 jq -n \
   --argjson pr "$PR_VIEW" \
-  --argjson checks "$CHECKS" \
-  --argjson comments "$COMMENTS" \
-  --argjson threads "$THREADS" \
+  --slurpfile checksIn <(printf '%s' "$CHECKS") \
+  --slurpfile commentsIn <(printf '%s' "$COMMENTS") \
+  --slurpfile threadsIn <(printf '%s' "$THREADS") \
   --argjson havePrReview "$HAVE_PR_REVIEW" \
   '
   def is_bot: (. // "") | endswith("[bot]");
@@ -73,7 +84,21 @@ jq -n \
               then (. | capture("/actions/runs/(?<id>[0-9]+)").id)
               else null end;
 
-  ($checks | map({
+  # Each --slurpfile is the array of documents in its stream. `add` for the
+  # comments because that call is --paginate, and `gh api --help` documents
+  # "each page is a separate JSON array or object": on such a stream a bare
+  # `[0]` would silently keep only the first page. gh 2.96.0 in fact merges
+  # array pages into one document, so `add` is the identity today -- it costs
+  # nothing and survives gh conforming to its own documentation. $threads takes
+  # `[0]`, not `add`, because that call is not paginated and `add` on two
+  # objects would merge keys rather than fall back. The `//` fallbacks repeat the
+  # json_or defaults above, because `add` on an empty stream is null and
+  # `null | map` aborts.
+  ($checksIn | add // []) as $checks
+  | ($commentsIn | add // []) as $comments
+  | ($threadsIn[0] // {reviews: []}) as $threads
+
+  | ($checks | map({
      name, bucket, link, workflow,
      runId: (.link | run_id),
      isActions: ((.link | run_id) != null)
