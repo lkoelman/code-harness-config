@@ -138,7 +138,16 @@ if [ -n "$MERGE_BASE" ]; then
     split("\n") | map(select(length > 0)) | map(split("\t")) | map({sha: .[0], subject: (.[1] // "")})')"
 fi
 
-DIFF="$(jq -n --argjson files "$NUMSTAT" --argjson status "$STATUS_MAP" '
+# The payloads that scale with the diff or carry an untruncated PR body arrive on
+# pipes, not in argv: Linux caps a *single* execve argument at MAX_ARG_STRLEN
+# (131072 bytes, a compile-time constant no ulimit raises), which one large diff
+# or one 65536-char PR body can exceed on JSON escaping alone. --slurpfile hands
+# the filter the array of documents in each stream, and each of these is exactly
+# one document. See pr-signals.sh, where this cap broke the collector outright.
+DIFF="$(jq -n --slurpfile filesIn <(printf '%s' "$NUMSTAT") --slurpfile statusIn <(printf '%s' "$STATUS_MAP") '
+  ($filesIn[0]) as $files
+  | ($statusIn[0]) as $status
+  |
   # numstat spells a rename either "old => new" or "dir/{old => new}/file".
   def newpath:
     if test("=>") then
@@ -304,12 +313,13 @@ if $PROFILE; then
 
   REVIEWERS="$(jq -n \
     --arg file "${CODEOWNERS_FILE:-}" \
-    --argjson owners "$CO_JSON" \
+    --slurpfile ownersIn <(printf '%s' "$CO_JSON") \
     --argjson authors "$TOP_AUTHORS" \
     --argjson frequent "$FREQUENT" \
     --argjson comments "$RECENT_COMMENTS" \
     --argjson requested "$(jq '[.reviewRequests[]? | (.login // .name)] | map(select(. != null))' <<<"$PR_JSON" 2>/dev/null || echo '[]')" '
-    ([($owners[] | ltrimstr("@") | select(test("/") | not)), ($frequent[].login), ($requested[]?)] | unique) as $cands
+    ($ownersIn[0]) as $owners
+    | ([($owners[] | ltrimstr("@") | select(test("/") | not)), ($frequent[].login), ($requested[]?)] | unique) as $cands
     | {
         profiled: true,
         codeownersFile: (if $file == "" then null else $file end),
@@ -335,19 +345,28 @@ jq -n \
   --arg head "$HEAD_BRANCH" \
   --arg mergeBase "${MERGE_BASE:-}" \
   --argjson haveGh "$HAVE_GH" \
-  --argjson pr "$PR_JSON" \
-  --argjson commits "$COMMITS" \
-  --argjson diff "$DIFF" \
+  --slurpfile prIn <(printf '%s' "$PR_JSON") \
+  --slurpfile commitsIn <(printf '%s' "$COMMITS") \
+  --slurpfile diffIn <(printf '%s' "$DIFF") \
   --argjson worktree "$WORKTREE" \
   --argjson prTemplate "$PR_TEMPLATE" \
   --argjson prTemplatePath "$PR_TEMPLATE_PATH" \
   --argjson contributing "$CONTRIBUTING" \
   --argjson recentMerged "$RECENT_MERGED" \
-  --argjson issueRefs "$ISSUE_REFS" \
+  --slurpfile issueRefsIn <(printf '%s' "$ISSUE_REFS") \
   --argjson issue "$ISSUE" \
   --argjson reviewers "$REVIEWERS" \
   --argjson notes "$(printf '%s\n' "${NOTES[@]:-}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
-  '{
+  '
+  # $pr gets no // fallback on purpose: PR_JSON is the literal `null` when no PR
+  # is open, and the output contract is that .pr is null there. $commits is the
+  # only one the shell defaults ([] at its declaration), so it is the only one
+  # that repeats a fallback here.
+  ($prIn[0]) as $pr
+  | ($commitsIn[0] // []) as $commits
+  | ($diffIn[0]) as $diff
+  | ($issueRefsIn[0]) as $issueRefs
+  | {
     repo: (if $repo == "" then null else $repo end),
     base: $base, baseRef: $baseRef, head: $head,
     mergeBase: (if $mergeBase == "" then null else $mergeBase end),

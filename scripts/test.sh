@@ -828,6 +828,44 @@ EOF
   pass "$name"
 }
 
+test_pr_recon_past_argv_cap() {
+  local name="skill grill-for-pr: pr-recon.sh survives a PR body past the argv cap"
+  local d; d="$(new_recon_sandbox)"
+  local recon="$REPO/skills/grill-for-pr/scripts/pr-recon.sh"
+  export FIXTURES="$d/fixtures"
+  cd "$d/repo" || { fail "$name (cd failed)"; return; }
+
+  echo '[]' >"$FIXTURES/merged.json"
+  echo '[]' >"$FIXTURES/review-comments.json"
+  echo '{"number":42,"title":"t","state":"OPEN","labels":[],"body":"b"}' >"$FIXTURES/issue.json"
+
+  # pr-recon.sh never truncates the PR body, so the body is the real argv load.
+  # 300000 chars is past MAX_ARG_STRLEN (131072), the per-argument kernel cap, so
+  # the old `--argjson pr` could not exec jq at all.
+  jq -nc '{number:5,url:"u",state:"OPEN",isDraft:false,title:"t",body:("x"*300000),
+           baseRefName:"main",headRefName:"feat",author:{login:"me"},
+           reviewRequests:[],additions:1,deletions:1,changedFiles:1}' >"$FIXTURES/view.json"
+
+  local bytes; bytes="$(wc -c <"$FIXTURES/view.json")"
+  if [ "$bytes" -le 131072 ]; then
+    fail "$name (fixture is only $bytes bytes, no longer past MAX_ARG_STRLEN: it proves nothing)"; return
+  fi
+
+  local out
+  out="$(PATH="$d/bin:$PATH" "$recon" --base main)" \
+    || { fail "$name (exited nonzero on a $bytes-byte PR body)"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (output is not JSON)"; return; }
+  jq -e '(.pr.body | length) == 300000' >/dev/null <<<"$out" \
+    || { fail "$name (PR body did not survive intact)"; return; }
+  # The diff and codeowners unwraps ride the same change, so pin them here too.
+  jq -e '(.diff.byFile | length) > 0 and (.reviewers.codeowners | length) > 0' >/dev/null <<<"$out" \
+    || { fail "$name (diff or codeowners lost in the slurpfile unwrap)"; return; }
+
+  cd "$REPO" || true
+  unset FIXTURES
+  pass "$name"
+}
+
 # ---------------------------------------------------------------------------
 # Sandbox for the scripts bundled with the ssh-teleport skill: a throwaway $HOME
 # holding one fake Claude Code session (transcript, subagent transcript, tool
@@ -1282,6 +1320,7 @@ test_poll_pr_reports_only_changes
 test_pr_signals_shape
 test_pr_signals_past_argv_cap
 test_pr_recon_shape
+test_pr_recon_past_argv_cap
 test_ssh_teleport_encodes_paths
 test_ssh_teleport_rewrites_transcript
 test_ssh_teleport_probe_parses_target
