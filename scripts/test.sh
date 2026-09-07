@@ -609,9 +609,9 @@ EOF
 EOF
   cat >"$FIXTURES/threads.json" <<'EOF'
 {"reviews":[{"comments":[
-  {"thread_id":"T1","path":"a.py","line":3,"author":"coderabbitai[bot]","body":"nit","is_resolved":false},
-  {"thread_id":"T2","path":"b.py","line":9,"author":"alice","body":"please rename","is_resolved":false},
-  {"thread_id":"T3","path":"c.py","line":1,"author":"alice","body":"done","is_resolved":true}
+  {"thread_id":"T1","path":"a.py","line":3,"author_login":"coderabbitai[bot]","body":"nit","is_resolved":false},
+  {"thread_id":"T2","path":"b.py","line":9,"author_login":"alice","body":"please rename","is_resolved":false},
+  {"thread_id":"T3","path":"c.py","line":1,"author_login":"alice","body":"done","is_resolved":true}
 ]}]}
 EOF
 
@@ -629,6 +629,11 @@ EOF
   fi
   jq -e '.reviewComments | map(select(.isBot)) | length == 1' >/dev/null <<<"$out" \
     || { fail "$name (bot classification of review comments wrong)"; return; }
+  # gh pr-review names this field author_login. Reading the wrong name silently
+  # yielded login "unknown" and isBot false for every thread, so botThreads was
+  # always 0 and the bots/reviews triggers could not tell them apart.
+  jq -e '[.unresolvedThreads[].login] == ["coderabbitai[bot]", "alice"]' >/dev/null <<<"$out" \
+    || { fail "$name (thread authors not resolved: $(jq -c '[.unresolvedThreads[].login]' <<<"$out"))"; return; }
 
   # Without the extension, threads are empty but everything else still works.
   touch "$FIXTURES/no-pr-review"

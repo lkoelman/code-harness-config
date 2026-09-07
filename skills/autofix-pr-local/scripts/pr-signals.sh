@@ -111,8 +111,12 @@ jq -n \
   | ([$threads.reviews[]?.comments[]? | select(.is_resolved == false) | {
        threadId: (.thread_id // .threadId // .id),
        path, line,
-       login: (.author // .user.login // "unknown"),
-       isBot: ((.author // .user.login // "") | is_bot),
+       # gh pr-review names this author_login; .author and .user.login are the
+       # REST spellings, kept as fallbacks. Reading only the latter two yielded
+       # "unknown" and isBot false for every thread, so counts.botThreads was
+       # always 0 and the bots/reviews triggers could not route on it.
+       login: (.author_login // .author // .user.login // "unknown"),
+       isBot: ((.author_login // .author // .user.login // "") | is_bot),
        body: (.body // "" | .[0:400])
      }]) as $th
   | {
