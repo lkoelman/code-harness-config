@@ -14,6 +14,60 @@ SANDBOXES=()
 pass() { echo "ok - $1"; }
 fail() { echo "FAIL - $1"; FAILURES=$((FAILURES + 1)); }
 
+# --------------------------------------------------------------- portability
+# macOS ships BSD userland and no GNU coreutils, so three things the tests lean
+# on differ from Linux. Each is wrapped once here rather than at every call.
+
+# `mktemp -d` hands back a path under a symlink on macOS (/var -> /private/var),
+# while the scripts under test canonicalise with `pwd -P`. Handing out the
+# physical path keeps the two spellings from disagreeing.
+mktemp_d() {
+  local d
+  d="$(mktemp -d)" || return 1
+  (cd "$d" && pwd -P)
+}
+
+# BSD sed wants an argument to -i and GNU sed must not get one, so no single
+# spelling works on both. Rewriting through a temp file sidesteps the flag.
+# Note the sed scripts here must use a literal tab ($'\t'), not \t: that escape
+# is a GNU extension too.
+sed_inplace() {
+  local script="$1" file="$2" tmp
+  tmp="$(mktemp)" || return 1
+  if sed "$script" "$file" >"$tmp"; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# GNU `timeout` is not on macOS at all. Fall back to a plain watchdog; the
+# 124 exit status matches what the real thing reports on expiry.
+run_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+    return $?
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+    return $?
+  fi
+  "$@" &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$secs" ]; then
+      kill -TERM "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+}
+
 cleanup() {
   for d in "${SANDBOXES[@]:-}"; do
     [ -n "$d" ] && rm -rf "$d"
@@ -25,7 +79,7 @@ trap cleanup EXIT
 # skills/agents/harnesses dirs. Prints the sandbox path.
 new_sandbox() {
   local d
-  d="$(mktemp -d)"
+  d="$(mktemp_d)"
   SANDBOXES+=("$d")
   mkdir -p "$d/scripts" "$d/skills" "$d/agents" "$d/harnesses"
   cp "$REPO/scripts/build.sh" "$REPO/scripts/install.sh" "$REPO/scripts/uninstall.sh" "$d/scripts/"
@@ -288,7 +342,7 @@ EOF
 mode: primary
 EOF
 
-  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
 
   if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
     fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
@@ -337,7 +391,7 @@ description: does widget things
 Widget body.
 EOF
 
-  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
   mkdir -p "$fake_home/.alpha/skills/widget"
   echo "keep-me" >"$fake_home/.alpha/skills/widget/keep-me.txt"
 
@@ -376,7 +430,7 @@ description: does widget things
 Widget body.
 EOF
 
-  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
 
   if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --dry-run >"$sandbox/install.log" 2>&1; then
     fail "$name (install.sh --dry-run exited nonzero)"; cat "$sandbox/install.log"; return
@@ -396,7 +450,7 @@ test_install_claude_md_symlink() {
   local sandbox; sandbox="$(new_sandbox)"
   write_alpha_conf_with_claude_md "$sandbox"
 
-  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
 
   if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
     fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
@@ -433,7 +487,7 @@ test_install_claude_md_guardrail_and_force() {
   local sandbox; sandbox="$(new_sandbox)"
   write_alpha_conf_with_claude_md "$sandbox"
 
-  local fake_home; fake_home="$(mktemp -d)"; SANDBOXES+=("$fake_home")
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
   echo "keep-me" >"$fake_home/CLAUDE.md"
 
   if HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
@@ -457,7 +511,7 @@ test_install_claude_md_guardrail_and_force() {
 # answers from fixture files, so no test touches the network or a real PR.
 new_gh_sandbox() {
   local d
-  d="$(mktemp -d)"
+  d="$(mktemp_d)"
   SANDBOXES+=("$d")
   mkdir -p "$d/bin" "$d/fixtures" "$d/repo"
   git -C "$d/repo" init -q
@@ -576,7 +630,7 @@ test_poll_pr_reports_only_changes() {
 
   # A closed PR is a terminal event, so the unbounded loop must exit on its own.
   echo '{"state":"CLOSED","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviews":[],"comments":[]}' >"$FIXTURES/view.json"
-  if ! PATH="$d/bin:$PATH" timeout 20 "$poll" --pr 1 --interval 1 >/dev/null 2>&1; then
+  if ! run_with_timeout 20 env PATH="$d/bin:$PATH" "$poll" --pr 1 --interval 1 >/dev/null 2>&1; then
     fail "$name (loop should exit when the PR closes)"; return
   fi
 
@@ -708,7 +762,7 @@ EOF
 # calls from fixtures. Prints the sandbox path; the caller uses $d/repo as cwd.
 new_recon_sandbox() {
   local d
-  d="$(mktemp -d)"
+  d="$(mktemp_d)"
   SANDBOXES+=("$d")
   mkdir -p "$d/bin" "$d/fixtures" "$d/repo"
   local g="git -C $d/repo -c user.email=t@t -c user.name=t"
@@ -879,7 +933,7 @@ test_pr_recon_past_argv_cap() {
 # Prints the sandbox path; the caller uses $d/home as HOME and $d/repo as cwd.
 new_teleport_sandbox() {
   local d
-  d="$(mktemp -d)"
+  d="$(mktemp_d)"
   SANDBOXES+=("$d")
 
   local sid="11111111-2222-3333-4444-555555555555"
@@ -1058,7 +1112,7 @@ test_ssh_teleport_rewrites_transcript() {
 # mock `ssh` on $PATH that records its argv and answers from $FIXTURES.
 new_ssh_sandbox() {
   local d
-  d="$(mktemp -d)"
+  d="$(mktemp_d)"
   SANDBOXES+=("$d")
   mkdir -p "$d/bin" "$d/fixtures" "$d/repo" "$d/home"
 
@@ -1124,7 +1178,7 @@ test_ssh_teleport_manifest_past_argv_cap() {
                    (.planFiles | map(select(startswith("'"$d"'/stage/.claude/plans/"))) | length | tostring)]
                   | join(",")' <<<"$out")"
   [ "$check" = "551,551,551" ] || { fail "$name (planFiles mangled: $check)"; return; }
-  [ "$(find "$d/stage/.claude/plans" -type f | wc -l)" = "551" ] \
+  [ "$(find "$d/stage/.claude/plans" -type f | wc -l)" -eq 551 ] \
     || { fail "$name (staged plan files do not match the manifest)"; return; }
 
   # The counters beside planFiles are integers and must stay integers.
@@ -1188,36 +1242,36 @@ EOF
   grep -q -- '-A' "$FIXTURES/argv" || { fail "$name (probe did not pass -A)"; return; }
 
   # A refused forwarding is reported, not silently assumed to work.
-  sed -i 's/^agentForwardingOk\tyes/agentForwardingOk\tno/' "$FIXTURES/probe"
+  sed_inplace $'s/^agentForwardingOk\tyes/agentForwardingOk\tno/' "$FIXTURES/probe"
   out="$(PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox 2>&1)"
   jq -e '.agentForwardingOk == false' >/dev/null <<<"$out" \
     || { fail "$name (refused agent forwarding not reported)"; return; }
 
   # No repo found on the target -> empty repoPath, still exit 0 so the skill can ask.
-  sed -i 's|^repoPath\t.*|repoPath\t|; s/^originMatches\tyes/originMatches\tno/' "$FIXTURES/probe"
+  sed_inplace $'s|^repoPath\t.*|repoPath\t|; s/^originMatches\tyes/originMatches\tno/' "$FIXTURES/probe"
   out="$(PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox 2>&1)" \
     || { fail "$name (a missing target repo should not be fatal)"; return; }
   jq -e '.repoPath == "" and .originMatches == false' >/dev/null <<<"$out" \
     || { fail "$name (missing repo not reported)"; return; }
 
   # Missing remote dependency -> exit 3.
-  sed -i 's/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
+  sed_inplace $'s/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox >/dev/null 2>&1
   [ "$?" -eq 3 ] || { fail "$name (a target without jq should exit 3)"; return; }
 
   # --summary teleports are the only ones that do not need `claude` on the
   # target, so --require narrows the list to that one dependency — but never to
   # jq or git, which remote-setup.sh uses in every mode.
-  sed -i 's/^hasJq\tno/hasJq\tyes/; s/^claudeVersion\t.*/claudeVersion\t/' "$FIXTURES/probe"
+  sed_inplace $'s/^hasJq\tno/hasJq\tyes/; s/^claudeVersion\t.*/claudeVersion\t/' "$FIXTURES/probe"
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
   [ "$?" -eq 0 ] || { fail "$name (--require rsync,jq,git should ignore a missing claude)"; return; }
-  sed -i 's/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
+  sed_inplace $'s/^hasJq\tyes/hasJq\tno/' "$FIXTURES/probe"
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
   [ "$?" -eq 3 ] || { fail "$name (a --summary teleport still needs jq on the target)"; return; }
-  sed -i 's/^hasJq\tno/hasJq\tyes/; s/^hasGit\tyes/hasGit\tno/' "$FIXTURES/probe"
+  sed_inplace $'s/^hasJq\tno/hasJq\tyes/; s/^hasGit\tyes/hasGit\tno/' "$FIXTURES/probe"
   PATH="$d/bin:$PATH" HOME="$d/home" "$probe" --host somebox --require rsync,jq,git >/dev/null 2>&1
   [ "$?" -eq 3 ] || { fail "$name (a --summary teleport still needs git on the target)"; return; }
-  sed -i 's/^hasGit\tno/hasGit\tyes/' "$FIXTURES/probe"
+  sed_inplace $'s/^hasGit\tno/hasGit\tyes/' "$FIXTURES/probe"
 
   # Unreachable host -> exit 2.
   touch "$FIXTURES/down"
@@ -1231,7 +1285,7 @@ EOF
 
 test_ssh_teleport_remote_setup_worktree() {
   local name="skill ssh-teleport: remote-setup.sh adds the worktree and registers the path"
-  local d; d="$(mktemp -d)"; SANDBOXES+=("$d")
+  local d; d="$(mktemp_d)"; SANDBOXES+=("$d")
   local rs="$REPO/skills/ssh-teleport/scripts/remote-setup.sh"
   local sid="11111111-2222-3333-4444-555555555555"
 
@@ -1319,7 +1373,7 @@ EOF
 
 test_ssh_teleport_remote_setup_check_repo() {
   local name="skill ssh-teleport: remote-setup.sh check-repo verifies a --summary teleport"
-  local d; d="$(mktemp -d)"; SANDBOXES+=("$d")
+  local d; d="$(mktemp_d)"; SANDBOXES+=("$d")
   local rs="$REPO/skills/ssh-teleport/scripts/remote-setup.sh"
 
   mkdir -p "$d/repo"

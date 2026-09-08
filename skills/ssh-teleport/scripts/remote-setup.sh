@@ -123,11 +123,18 @@ case "$CMD" in
     done
     [ -n "$WT_PATH" ] || { echo "error: register needs --path" >&2; exit 1; }
 
+    # verify looks the key up under the worktree's real path, so register has to
+    # store it under that same spelling — otherwise a caller passing a path that
+    # crosses a symlink (/var -> /private/var on macOS) writes a key verify will
+    # never find, and the trust dialog appears anyway.
+    REAL_PATH="$(cd "$WT_PATH" 2>/dev/null && pwd -P)" || REAL_PATH=""
+    [ -n "$REAL_PATH" ] || REAL_PATH="$WT_PATH"
+
     # Only ever add one key. This file also holds machineID, userID and the
     # account's oauth entry, so it is merged in place and never replaced.
     [ -f "$CONFIG" ] || echo '{}' >"$CONFIG"
     tmp="$CONFIG.ssh-teleport.tmp"
-    jq --arg p "$WT_PATH" \
+    jq --arg p "$REAL_PATH" \
        '.projects = ((.projects // {}) | .[$p] = ((.[$p] // {}) + {hasTrustDialogAccepted: true}))' \
        "$CONFIG" >"$tmp" || { rm -f "$tmp"; echo "error: could not merge into $CONFIG" >&2; exit 1; }
     mv "$tmp" "$CONFIG"
@@ -145,7 +152,7 @@ case "$CMD" in
       fi
     fi
 
-    jq -n --arg path "$WT_PATH" --argjson appended "$APPENDED" \
+    jq -n --arg path "$REAL_PATH" --argjson appended "$APPENDED" \
       '{path: $path, registered: true, historyLinesAppended: $appended}'
     ;;
 
