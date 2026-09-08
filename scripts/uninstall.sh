@@ -20,7 +20,14 @@ for arg in "$@"; do
   esac
 done
 
-mapfile -t KNOWN_HARNESSES < <(
+# Read-loop instead of `mapfile`, which macOS's bash 3.2 does not have.
+# For the same reason arrays that may be empty are expanded through the
+# ${arr[@]+...} / ${arr[*]-} guards: bash 3.2 treats an empty array as unset
+# and `set -u` would abort on a bare "${arr[@]}".
+declare -a KNOWN_HARNESSES=()
+while IFS= read -r conf_name; do
+  [ -n "$conf_name" ] && KNOWN_HARNESSES+=("$conf_name")
+done < <(
   for f in "$HARNESSES_DIR"/*.conf; do
     [ -e "$f" ] || continue
     basename "$f" .conf
@@ -28,20 +35,20 @@ mapfile -t KNOWN_HARNESSES < <(
 )
 
 if [ "$ALL" -eq 1 ]; then
-  TARGETS=("${KNOWN_HARNESSES[@]}")
+  TARGETS=(${KNOWN_HARNESSES[@]+"${KNOWN_HARNESSES[@]}"})
 fi
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
   echo "usage: uninstall.sh (--all|<harness>...)" >&2
-  echo "known harnesses: ${KNOWN_HARNESSES[*]}" >&2
+  echo "known harnesses: ${KNOWN_HARNESSES[*]-}" >&2
   exit 1
 fi
 
 for h in "${TARGETS[@]}"; do
   found=0
-  for k in "${KNOWN_HARNESSES[@]}"; do [ "$k" = "$h" ] && found=1; done
+  for k in ${KNOWN_HARNESSES[@]+"${KNOWN_HARNESSES[@]}"}; do [ "$k" = "$h" ] && found=1; done
   if [ "$found" -eq 0 ]; then
-    echo "error: unknown harness '$h' (known: ${KNOWN_HARNESSES[*]})" >&2
+    echo "error: unknown harness '$h' (known: ${KNOWN_HARNESSES[*]-})" >&2
     exit 1
   fi
 done

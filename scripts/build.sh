@@ -17,7 +17,14 @@ lint_error() { echo "lint error: $1" >&2; LINT_FAIL=1; }
 
 # All known harness names, longest first (so header filename matching never
 # mis-splits a harness name that is a prefix of another).
-mapfile -t KNOWN_HARNESSES < <(
+# Read-loop instead of `mapfile`, which macOS's bash 3.2 does not have.
+# For the same reason arrays that may be empty are expanded through the
+# ${arr[@]+...} / ${arr[*]-} guards: bash 3.2 treats an empty array as unset
+# and `set -u` would abort on a bare "${arr[@]}".
+declare -a KNOWN_HARNESSES=()
+while IFS= read -r conf_name; do
+  [ -n "$conf_name" ] && KNOWN_HARNESSES+=("$conf_name")
+done < <(
   for f in "$HARNESSES_DIR"/*.conf; do
     [ -e "$f" ] || continue
     basename "$f" .conf
@@ -26,7 +33,7 @@ mapfile -t KNOWN_HARNESSES < <(
 
 harness_known() {
   local h="$1"
-  for k in "${KNOWN_HARNESSES[@]}"; do [ "$k" = "$h" ] && return 0; done
+  for k in ${KNOWN_HARNESSES[@]+"${KNOWN_HARNESSES[@]}"}; do [ "$k" = "$h" ] && return 0; done
   return 1
 }
 
@@ -52,7 +59,8 @@ parse_harnesses_key() {
   local line
   line="$(grep -m1 '^harnesses:' <<<"$1" || true)"
   [ -z "$line" ] && return 0
-  sed -E 's/^harnesses:\s*\[(.*)\]\s*$/\1/' <<<"$line" \
+  # [[:space:]] rather than \s: BSD sed (macOS) has no \s escape.
+  sed -E 's/^harnesses:[[:space:]]*\[(.*)\][[:space:]]*$/\1/' <<<"$line" \
     | tr ',' '\n' \
     | sed -E 's/^[[:space:]"'"'"']*//; s/[[:space:]"'"'"']*$//'
 }
@@ -67,7 +75,7 @@ list_header_files() {
     rest="${rest%.yaml}"
     matched=""
     variant=""
-    for h in "${KNOWN_HARNESSES[@]}"; do
+    for h in ${KNOWN_HARNESSES[@]+"${KNOWN_HARNESSES[@]}"}; do
       if [ "$rest" = "$h" ]; then
         matched="$h"; variant=""; break
       elif [[ "$rest" == "$h."* ]]; then
@@ -75,7 +83,7 @@ list_header_files() {
       fi
     done
     if [ -z "$matched" ]; then
-      lint_error "$f does not match any known harness (known: ${KNOWN_HARNESSES[*]})"
+      lint_error "$f does not match any known harness (known: ${KNOWN_HARNESSES[*]-})"
       continue
     fi
     echo "$f|$matched|$variant"
@@ -233,11 +241,11 @@ build_agents_for() {
 main() {
   local requested=("$@")
   if [ "${#requested[@]}" -eq 0 ]; then
-    requested=("${KNOWN_HARNESSES[@]}")
+    requested=(${KNOWN_HARNESSES[@]+"${KNOWN_HARNESSES[@]}"})
   fi
-  for h in "${requested[@]}"; do
+  for h in ${requested[@]+"${requested[@]}"}; do
     if ! harness_known "$h"; then
-      echo "error: unknown harness '$h' (known: ${KNOWN_HARNESSES[*]})" >&2
+      echo "error: unknown harness '$h' (known: ${KNOWN_HARNESSES[*]-})" >&2
       exit 1
     fi
   done
@@ -248,7 +256,7 @@ main() {
     exit 1
   fi
 
-  for h in "${requested[@]}"; do
+  for h in ${requested[@]+"${requested[@]}"}; do
     rm -rf "${BUILD_DIR:?}/$h"
     build_skills_for "$h"
     build_agents_for "$h"
