@@ -1085,6 +1085,61 @@ EOF
   echo "$d"
 }
 
+test_ssh_teleport_manifest_past_argv_cap() {
+  local name="skill ssh-teleport: stage-session.sh survives a plan list past the argv cap"
+  local d; d="$(new_teleport_sandbox)"
+  local stage="$REPO/skills/ssh-teleport/scripts/stage-session.sh"
+  local sid="11111111-2222-3333-4444-555555555555"
+  local src="$d/repo"
+  local cc="$d/home/.claude"
+  local enc; enc="$(printf '%s' "$src" | sed 's/[^a-zA-Z0-9]/-/g')"
+
+  # planFiles is the one manifest value whose *length* grows with the session:
+  # the six counters beside it are integers. 550 plan files with 200-char
+  # basenames put the array past MAX_ARG_STRLEN (131072 bytes), the per-argument
+  # kernel cap, so it cannot travel in argv.
+  local base; base="$(printf 'p%.0s' $(seq 1 200))"
+  local i
+  for i in $(seq 1 550); do
+    echo "# plan $i for $src" >"$cc/plans/$base-$i.md"
+    printf '{"parentUuid":"a-1","isSidechain":false,"type":"attachment","uuid":"at-x%s","timestamp":"2026-08-05T18:06:02.000Z","attachment":{"type":"plan_mode","planFilePath":"%s/plans/%s-%s.md"},"cwd":"%s","sessionId":"%s","version":"2.1.222","gitBranch":"main"}\n' \
+      "$i" "$cc" "$base" "$i" "$src" "$sid" >>"$cc/projects/$enc/$sid.jsonl"
+  done
+
+  local out
+  out="$(HOME="$d/home" "$stage" --session-id "$sid" --target-cwd /home/bob/repo \
+          --target-home /home/bob --target-branch feature --out "$d/stage" 2>&1)" \
+    || { fail "$name (exited nonzero: $(printf '%s' "$out" | head -c 200))"; return; }
+  jq -e . >/dev/null 2>&1 <<<"$out" || { fail "$name (manifest is not JSON)"; return; }
+
+  local bytes; bytes="$(jq -c '.planFiles' <<<"$out" | wc -c)"
+  if [ "$bytes" -le 131072 ]; then
+    fail "$name (planFiles is only $bytes bytes, no longer past MAX_ARG_STRLEN: it proves nothing)"; return
+  fi
+
+  # Every plan is listed once, staged on disk, and rewritten to the target home.
+  local check
+  check="$(jq -r '[(.planFiles | length | tostring),
+                   (.planFiles | unique | length | tostring),
+                   (.planFiles | map(select(startswith("'"$d"'/stage/.claude/plans/"))) | length | tostring)]
+                  | join(",")' <<<"$out")"
+  [ "$check" = "551,551,551" ] || { fail "$name (planFiles mangled: $check)"; return; }
+  [ "$(find "$d/stage/.claude/plans" -type f | wc -l)" = "551" ] \
+    || { fail "$name (staged plan files do not match the manifest)"; return; }
+
+  # The counters beside planFiles are integers and must stay integers.
+  jq -e '(.subagentTranscripts | type) == "number" and (.toolResults | type) == "number"
+         and (.fileHistoryEntries | type) == "number"' >/dev/null <<<"$out" \
+    || { fail "$name (a counter stopped being a number)"; return; }
+
+  # Size-independence is a property of the transport, not of this fixture.
+  if grep -qE -- '--argjson planFiles ' "$stage"; then
+    fail "$name (planFiles is back in argv)"; return
+  fi
+
+  pass "$name"
+}
+
 test_ssh_teleport_probe_parses_target() {
   local name="skill ssh-teleport: probe-target.sh resolves the target and forwards the agent"
   local d; d="$(new_ssh_sandbox)"
@@ -1328,6 +1383,7 @@ test_pr_recon_shape
 test_pr_recon_past_argv_cap
 test_ssh_teleport_encodes_paths
 test_ssh_teleport_rewrites_transcript
+test_ssh_teleport_manifest_past_argv_cap
 test_ssh_teleport_probe_parses_target
 test_ssh_teleport_remote_setup_worktree
 test_ssh_teleport_remote_setup_check_repo

@@ -214,8 +214,16 @@ jq -n --arg sid "$SID" --arg srcCwd "$SRC_CWD" --arg dstCwd "$TARGET_CWD" \
       --argjson subagents "$SUBAGENTS" --argjson toolResults "$TOOL_RESULTS" \
       --argjson fileHistory "$FILE_HISTORY" \
       --argjson historyLines "$(wc -l <"$HISTORY_FRAGMENT")" \
-      --argjson planFiles "$(printf '%s\n' "${PLAN_FILES[@]:-}" | jq -Rc 'select(. != "")' | jq -sc .)" \
-  '{sessionId: $sid, sourceCwd: $srcCwd, targetCwd: $dstCwd, encodedDir: $enc,
+      --slurpfile planFilesIn <(printf '%s\n' "${PLAN_FILES[@]:-}" | jq -Rc 'select(. != "")' | jq -sc .) \
+  '
+  # planFiles is the one value here whose *length* grows with the session; every
+  # counter above is an integer. A single execve argument is capped at
+  # MAX_ARG_STRLEN (131072 bytes, a compile-time kernel constant that no ulimit
+  # raises), so a session carrying enough plans could not build its manifest at
+  # all -- see pr-signals.sh, where the same cap broke the collector outright.
+  # The stream is exactly one document, hence [0] rather than add.
+  ($planFilesIn[0]) as $planFiles
+  | {sessionId: $sid, sourceCwd: $srcCwd, targetCwd: $dstCwd, encodedDir: $enc,
     targetBranch: $branch, slug: $slug, stageDir: $stage, entries: $entries,
     bytes: $bytes, subagentTranscripts: $subagents, toolResults: $toolResults,
     fileHistoryEntries: $fileHistory, planFiles: $planFiles,
