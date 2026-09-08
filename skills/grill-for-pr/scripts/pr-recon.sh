@@ -273,13 +273,22 @@ if $PROFILE; then
 
   CO_OWNERS=()
   if [ -n "$CODEOWNERS_FILE" ]; then
-    mapfile -t changed_paths < <(jq -r '.byFile[].path' <<<"$DIFF")
+    # Read-loop rather than `mapfile`, which is bash 4+ and so absent from the
+    # bash 3.2 macOS ships. The `|| [ -n "$p" ]` picks up a final line with no
+    # trailing newline; the emptiness test keeps a blank line from becoming an
+    # array element that would later read as a bad pathspec.
+    declare -a changed_paths=()
+    while IFS= read -r p || [ -n "$p" ]; do
+      [ -n "$p" ] && changed_paths+=("$p")
+    done < <(jq -r '.byFile[].path' <<<"$DIFF")
     while read -r line; do
       line="${line%%#*}"
       [ -z "${line// }" ] && continue
       read -r pat rest <<<"$line"
       [ -z "${rest:-}" ] && continue
-      for p in "${changed_paths[@]}"; do
+      # bash 3.2 treats an empty array as unset, so `set -u` would abort on a
+      # bare "${changed_paths[@]}" for a PR that touches nothing.
+      for p in ${changed_paths[@]+"${changed_paths[@]}"}; do
         if co_match "$pat" "$p"; then
           for owner in $rest; do CO_OWNERS+=("$owner"); done
           break
@@ -291,7 +300,10 @@ if $PROFILE; then
 
   # Who has actually lived in these files. Author names are not GitHub logins,
   # so this is a hint for the interview, not something to address the PR to.
-  mapfile -t top_paths < <(jq -r '.substantive[0:20][]' <<<"$DIFF")
+  declare -a top_paths=()
+  while IFS= read -r p || [ -n "$p" ]; do
+    [ -n "$p" ] && top_paths+=("$p")
+  done < <(jq -r '.substantive[0:20][]' <<<"$DIFF")
   TOP_AUTHORS='[]'
   if [ "${#top_paths[@]}" -gt 0 ]; then
     TOP_AUTHORS="$(git log --no-merges --format='%an' -n 300 -- "${top_paths[@]}" 2>/dev/null \
