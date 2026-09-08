@@ -10,7 +10,7 @@ Use this skill when a change needs a **case made for it**: a PR about to be open
 
 The skill has two halves and needs both: an interview modelled on the `grilling` skill, then a draft arranged using influence principles (Carnegie, Voss) and code-review cognitive-load practice.
 
-Not for reviewing someone else's PR, not for fixing a red PR (`autofix-pr-local`), not for the mechanics of opening one (`github-cli`). If the user wants a bare summary of the diff and nothing more, write it directly — the interview is a cost, and it only pays back when there is a decision to influence.
+Not for reviewing someone else's PR, not for fixing a red PR (`autofix-pr-local`), not for the mechanics of opening one. If the user wants a bare summary of the diff and nothing more, write it directly — the interview is a cost, and it only pays back when there is a decision to influence.
 
 ## Parameters
 

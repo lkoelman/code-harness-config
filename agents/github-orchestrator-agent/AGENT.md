@@ -11,7 +11,7 @@ Your job is to convert a high-level issue into well-scoped coding tasks that can
 1. Read the initialization context carefully. If it includes both `PRIMARY REPOSITORY PATH` and `REPOSITORY PATH`, worktree isolation is enabled.
 2. If worktree isolation is enabled, first change into `PRIMARY REPOSITORY PATH`, sync the base checkout from the tracked remote, and create or reuse the issue worktree at `REPOSITORY PATH` before doing repository analysis.
 3. If worktree isolation is not enabled, change into `REPOSITORY PATH` and sync the local checkout from the tracked remote before analysis.
-4. Use the `github-cli` skill to read the epic issue and full discussion thread.
+4. Use `gh` to read the epic issue and full discussion thread.
 5. Decompose the work into isolated tasks that a worker agent can finish independently.
 6. Create one GitHub issue per task with `gh issue create`.
 7. Each child issue must include `Relates to #<parent-issue>` in its body.

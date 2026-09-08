@@ -19,7 +19,7 @@ You will receive a structured initialization prompt with the target issue number
 1. Read the initialization context carefully. If it includes both `PRIMARY REPOSITORY PATH` and `REPOSITORY PATH`, worktree isolation is enabled.
 2. If worktree isolation is enabled, first change into `PRIMARY REPOSITORY PATH`, sync the base checkout from the tracked remote, and create or reuse the issue worktree at `REPOSITORY PATH` before making any edits.
 3. If worktree isolation is not enabled, change into `REPOSITORY PATH` and sync the local checkout from the tracked remote before planning or coding.
-4. Use the `github-cli` skill to read the full issue thread for the target issue.
+4. Use `gh` to read the full issue thread for the target issue.
 5. Inspect the local codebase and determine the right implementation approach.
 6. Post a plan comment to the issue.
 The final line of the plan comment must be exactly `[AWAITING_APPROVAL]`.
@@ -33,7 +33,7 @@ The final line of the plan comment must be exactly `[AWAITING_APPROVAL]`.
 
 ## Operating rules
 
-- Use the `github-cli` skill for GitHub issue and PR operations.
+- Use `gh` for GitHub issue and PR operations.
 - Do not manage workflow labels yourself unless the task explicitly instructs it.
 - Do not close issues yourself.
 - Keep comments short and operationally useful.

@@ -8,8 +8,6 @@
 |---|---|
 | [`autofix-pr-local`](skills/autofix-pr-local/SKILL.md) | Shepherds an open PR to green from your machine: loops over failing CI checks, reviewer and bot comments, and base-branch conflicts, fixing the highest-priority signal and committing one fix per issue. |
 | [`grill-for-pr`](skills/grill-for-pr/SKILL.md) | Interviews you for the context a diff can't show, then writes a PR title and description engineered for reviewer buy-in — honest, persuasive, and short enough to actually get read. |
-| [`github-cli`](skills/github-cli/SKILL.md) | House rules for driving issues, pull requests and review threads through `gh` instead of ad hoc API calls or web fetches. |
-| [`remote-git-examples`](skills/remote-git-examples/SKILL.md) | Inspect code behind a GitHub (or any remote git) URL by shallow-cloning it to a temp dir rather than scraping the web UI. |
 | [`ssh-teleport`](skills/ssh-teleport/SKILL.md) | Moves the current Claude Code session to another machine — transcript, tool results, plan, file history and working tree — landing in a fresh worktree there. `--summary` sends the code plus a written handoff instead, for a teammate or a fresh session. |
 | [`document-architecture`](skills/document-architecture/SKILL.md) | Generates an `ARCHITECTURE.md` for an existing codebase, written as an onboarding entry point for both new developers and coding agents. |
 | [`handoff-doc`](skills/handoff-doc/SKILL.md) | Write handoff document so you can /clear or /compact the context window and the next agent can continue the session. |
@@ -38,10 +36,10 @@ A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`descri
 
 ## Prerequisites
 
-- [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `github-cli` and `grill-for-pr` skills and the GitHub-driven agents.
+- [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `grill-for-pr` skill and the GitHub-driven agents.
 - The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
 - The [`gh-webhook`](https://github.com/cli/gh-webhook) extension, only if you want push-style GitHub event forwarding instead of polling: `gh extension install cli/gh-webhook`. Note it needs admin rights on the repo to register the webhook, plus a local HTTP receiver.
-- `jq` — used by the `github-cli`, `autofix-pr-local`, `grill-for-pr` and `ssh-teleport` skills to read structured JSON.
+- `jq` — used by the `autofix-pr-local`, `grill-for-pr` and `ssh-teleport` skills to read structured JSON.
 - `rsync` — used by the `ssh-teleport` skill to move session data between machines. **On the target** it needs `rsync`, `jq` and `git` in every mode, plus `claude` at a version matching the source for anything but a `--summary` handoff; and, so the target can pull from `origin` without credentials of its own, a local `ssh-agent` holding a usable key (`ssh-add -l`) plus `AllowAgentForwarding` enabled on the target.
 
 To install all of the above:

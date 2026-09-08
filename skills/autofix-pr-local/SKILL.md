@@ -8,7 +8,7 @@ argument-hint: --max-attempts <N> [--mode fix-local|fix-push|full-auto] [--only 
 
 Use this skill when an **open pull request** needs shepherding: CI is failing, reviewers (human or bot) left comments, or the base branch moved ahead. The skill loops — collect signals, fix the highest-priority one, commit, verify — until the PR is clean or the attempt budget runs out.
 
-Not for opening a PR (that is `github-cli`), reviewing someone else's PR, or merging.
+Not for opening a PR, reviewing someone else's PR, or merging.
 
 ## Parameters
 
