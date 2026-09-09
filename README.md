@@ -24,6 +24,7 @@ skills/<name>/SKILL.md               # one skill, shared across every harness
 agents/<name>/AGENT.md               # one agent definition, shared across every harness
 harnesses/<harness>.conf             # where each harness's skills/agents/settings live
 harnesses/pi-agent/settings.json     # pi-agent's settings.json, symlinked in on install
+harnesses/claude/output-styles/<name>.md  # Claude Code output style, symlinked in on install
 scripts/install-prerequisites.sh     # installs gh, jq and the gh extensions the skills need
 scripts/build.sh                     # splices frontmatter, writes build/<harness>/...
 scripts/install.sh                   # builds, then symlinks into each harness's config dir
@@ -65,7 +66,7 @@ This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks ea
 
 | Harness | Skills | Agents | Notes |
 |---|---|---|---|
-| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. |
+| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. Also symlinks `harnesses/claude/output-styles/*.md` to `~/.claude/output-styles/<name>.md`. |
 | Codex CLI | `~/.codex/skills/<name>` | — | Codex doesn't support markdown subagent definitions. |
 | Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | Run `/skills reload` after installing/updating. |
 | OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | Native path, not `~/.opencode/`. |
@@ -87,6 +88,12 @@ Uninstall only ever removes symlinks that resolve back into this repo; it never 
 ## Global instructions (`CLAUDE.md`)
 
 `scripts/install.sh` symlinks `harnesses/<harness>/CLAUDE.md` to the `CLAUDE_MD_DEST` that harness's `.conf` declares (`~/.claude/CLAUDE.md` for Claude Code) — a single real file, not a per-name directory, and (unlike skills/agents) not spliced with any per-harness frontmatter. No harness ships one right now: the writing-style directives that used to live in `harnesses/claude/CLAUDE.md` are now the [`terse-precise`](skills/terse-precise/SKILL.md) skill, invoked per request instead of applied to every session. Add the file back and re-run `./scripts/install.sh claude` to restore the symlink.
+
+## Output styles
+
+`scripts/install.sh` symlinks each file in `harnesses/<harness>/output-styles/` to `OUTPUT_STYLES_DIR` that harness's `.conf` declares (`~/.claude/output-styles/<name>.md` for Claude Code) — one symlink per file, no splicing, same as `CLAUDE.md`. Output styles are a [Claude Code-specific mechanism](https://code.claude.com/docs/en/output-styles) that replaces the whole system prompt for the session (unlike a skill, invoked per request); no other harness in this repo has an equivalent, so `OUTPUT_STYLES_DIR` is only set in `harnesses/claude.conf`.
+
+This repo ships one: [`terse-precise-technical`](harnesses/claude/output-styles/terse-precise-technical.md), the same terse/ASD-STE100 writing standard as the [`terse-precise`](skills/terse-precise/SKILL.md) skill, but applied to the whole session instead of one request. After installing, activate it in Claude Code with `/config` → **Output style**.
 
 ## Adding or editing a skill
 

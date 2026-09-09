@@ -116,6 +116,27 @@ EOF
   echo "alpha global instructions" >"$sandbox/harnesses/alpha/CLAUDE.md"
 }
 
+# alpha.conf with an OUTPUT_STYLES_DIR, plus one fixture style file under
+# harnesses/alpha/output-styles/ (mirrors the CLAUDE.md pattern, but a
+# directory of files rather than a single destination file).
+write_alpha_conf_with_output_styles() {
+  local sandbox="$1"
+  cat >"$sandbox/harnesses/alpha.conf" <<'EOF'
+SKILLS_DIR="$HOME/.alpha/skills"
+AGENTS_DIR="$HOME/.alpha/agents"
+OUTPUT_STYLES_DIR="$HOME/.alpha/output-styles"
+EOF
+  mkdir -p "$sandbox/harnesses/alpha/output-styles"
+  cat >"$sandbox/harnesses/alpha/output-styles/sample-style.md" <<'EOF'
+---
+name: sample-style
+description: a sample output style
+---
+
+Sample style body.
+EOF
+}
+
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough() {
   local name="build: splices frontmatter, preserves body, copies supporting files"
@@ -501,6 +522,78 @@ test_install_claude_md_guardrail_and_force() {
   [ -L "$fake_home/CLAUDE.md" ] || { fail "$name (target not a symlink after --force)"; return; }
   [ -f "$fake_home/CLAUDE.md.bak" ] || { fail "$name (no backup of clobbered real file found)"; return; }
   [ "$(cat "$fake_home/CLAUDE.md.bak")" = "keep-me" ] || { fail "$name (backup missing original content)"; return; }
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_output_styles_symlink() {
+  local name="install/uninstall: OUTPUT_STYLES_DIR symlinks harnesses/<h>/output-styles/*, idempotent"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_conf_with_output_styles "$sandbox"
+
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
+  fi
+
+  local dest="$fake_home/.alpha/output-styles/sample-style.md"
+  [ -L "$dest" ] || { fail "$name (output style symlink not created)"; return; }
+  [ "$(readlink -f "$dest")" = "$(readlink -f "$sandbox/harnesses/alpha/output-styles/sample-style.md")" ] \
+    || { fail "$name (output style symlink target wrong)"; return; }
+  grep -q "Sample style body." "$dest" || { fail "$name (output style content wrong)"; return; }
+
+  # reinstall is idempotent
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install2.log" 2>&1; then
+    fail "$name (reinstall exited nonzero)"; cat "$sandbox/install2.log"; return
+  fi
+  [ -L "$dest" ] || { fail "$name (output style symlink gone after reinstall)"; return; }
+
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha >"$sandbox/uninstall.log" 2>&1; then
+    fail "$name (uninstall.sh exited nonzero)"; cat "$sandbox/uninstall.log"; return
+  fi
+  [ -e "$dest" ] && { fail "$name (output style symlink still present after uninstall)"; return; }
+
+  # uninstalling again is a harmless no-op
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha >"$sandbox/uninstall2.log" 2>&1; then
+    fail "$name (second uninstall exited nonzero)"; cat "$sandbox/uninstall2.log"; return
+  fi
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_output_styles_prune_stale() {
+  local name="install: prunes a stale output-style symlink after its source file is removed"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_conf_with_output_styles "$sandbox"
+  cat >"$sandbox/harnesses/alpha/output-styles/other-style.md" <<'EOF'
+---
+name: other-style
+description: another sample output style
+---
+
+Other style body.
+EOF
+
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
+  fi
+  local kept="$fake_home/.alpha/output-styles/sample-style.md"
+  local removed="$fake_home/.alpha/output-styles/other-style.md"
+  [ -L "$kept" ] || { fail "$name (sample-style symlink not created)"; return; }
+  [ -L "$removed" ] || { fail "$name (other-style symlink not created)"; return; }
+
+  rm "$sandbox/harnesses/alpha/output-styles/other-style.md"
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha >"$sandbox/install2.log" 2>&1; then
+    fail "$name (reinstall exited nonzero)"; cat "$sandbox/install2.log"; return
+  fi
+  [ -e "$removed" ] && { fail "$name (stale other-style symlink not pruned)"; return; }
+  [ -L "$kept" ] || { fail "$name (sample-style symlink pruned by mistake)"; return; }
 
   pass "$name"
 }
@@ -1429,6 +1522,8 @@ test_install_guardrail_and_force
 test_install_dry_run
 test_install_claude_md_symlink
 test_install_claude_md_guardrail_and_force
+test_install_output_styles_symlink
+test_install_output_styles_prune_stale
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape

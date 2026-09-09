@@ -123,17 +123,18 @@ link_item() {
   echo "installed $label -> $dest"
 }
 
-# Removes symlinks in $1 whose target points into $REPO/build/ but no longer
-# resolves to anything (leftover from a renamed/removed skill or agent).
+# Removes symlinks in $1 whose target points into $2 (default $REPO/build/)
+# but no longer resolves to anything (leftover from a renamed/removed
+# skill, agent, or output style).
 prune_stale() {
-  local dir="$1" link raw
+  local dir="$1" prefix="${2:-$REPO/build/}" link raw
   [ -d "$dir" ] || return 0
   for link in "$dir"/*; do
     [ -L "$link" ] || continue
     [ -e "$link" ] && continue
     raw="$(readlink "$link")"
     case "$raw" in
-      "$REPO"/build/*)
+      "$prefix"*)
         if [ "$DRY_RUN" -eq 1 ]; then
           echo "would prune stale link $link"
         else
@@ -150,6 +151,7 @@ for h in "${TARGETS[@]}"; do
   AGENTS_DIR=""
   SETTINGS_DEST=""
   CLAUDE_MD_DEST=""
+  OUTPUT_STYLES_DIR=""
   # shellcheck disable=SC1090
   source "$HARNESSES_DIR/$h.conf"
 
@@ -183,6 +185,18 @@ for h in "${TARGETS[@]}"; do
 
   if [ -n "$CLAUDE_MD_DEST" ] && [ -f "$HARNESSES_DIR/$h/CLAUDE.md" ]; then
     link_item "$HARNESSES_DIR/$h/CLAUDE.md" "$CLAUDE_MD_DEST" "CLAUDE.md $h"
+  fi
+
+  if [ -n "$OUTPUT_STYLES_DIR" ]; then
+    [ "$DRY_RUN" -eq 1 ] || mkdir -p "$OUTPUT_STYLES_DIR"
+    if [ -d "$HARNESSES_DIR/$h/output-styles" ]; then
+      for item in "$HARNESSES_DIR/$h/output-styles"/*; do
+        [ -e "$item" ] || continue
+        name="$(basename "$item")"
+        link_item "$item" "$OUTPUT_STYLES_DIR/$name" "output style $h/$name"
+      done
+    fi
+    prune_stale "$OUTPUT_STYLES_DIR" "$REPO/harnesses/$h/output-styles/"
   fi
 done
 

@@ -73,11 +73,13 @@ for h in "${TARGETS[@]}"; do
   AGENTS_DIR=""
   SETTINGS_DEST=""
   CLAUDE_MD_DEST=""
+  OUTPUT_STYLES_DIR=""
   # shellcheck disable=SC1090
   source "$HARNESSES_DIR/$h.conf"
 
   [ -n "$SKILLS_DIR" ] && remove_repo_links "$SKILLS_DIR" "$REPO/build/"
   [ -n "$AGENTS_DIR" ] && remove_repo_links "$AGENTS_DIR" "$REPO/build/"
+  [ -n "$OUTPUT_STYLES_DIR" ] && remove_repo_links "$OUTPUT_STYLES_DIR" "$REPO/harnesses/$h/output-styles/"
 
   if [ -n "$SETTINGS_DEST" ] && [ -L "$SETTINGS_DEST" ]; then
     raw="$(readlink "$SETTINGS_DEST")"
