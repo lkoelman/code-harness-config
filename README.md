@@ -14,6 +14,12 @@
 | [`unslop`](skills/unslop/SKILL.md) | Rewrites existing text to name mechanisms instead of metaphors, qualify ambiguous technical nouns, and replace unmeasurable claims with values. Sources every rewrite from the code rather than inventing a mechanism it cannot verify. |
 | [`terse-precise`](skills/terse-precise/SKILL.md) | Writes or rewrites text to the terse, technically precise standard optimized for skimming: name the file, function, condition and effect instead of a metaphor, qualify every ambiguous technical noun, and state both ends of relational jargon. |
 | [`claudish-to-english`](skills/claudish-to-english/SKILL.md) | Paraphrases Claude's characteristic prose — contrast-heavy, metaphorical, restatement-prone — into plain English, collapsing repeated propositions and lowering the abstraction level while preserving every fact and logical scope. |
+| [`org-agenda-entry`](skills/org-agenda-entry/SKILL.md) | Adds or updates today's (or a requested date's) entry in `Matta-agenda.md` from within a coding session, summarizing progress toward project goals. Edits only the target date's section. |
+| [`org-capture-coding-session`](skills/org-capture-coding-session/SKILL.md) | Summarizes a coding or design session into a dated decision log, and links it from the relevant project in `PROJECTS.md`. |
+| [`org-daily-checkin`](skills/org-daily-checkin/SKILL.md) | Runs a weekday morning check-in: today's agenda entry, Linear issues needing attention, and anything worth flagging before the day starts. |
+| [`org-weekly-checkin`](skills/org-weekly-checkin/SKILL.md) | Runs an end-of-week review: what shipped, `PROJECTS.md` synced against Linear, `TEAM.md` observations triaged, and a short reflection on growth and visibility. |
+
+These four `org-*` skills are personal workflow skills tied to one person's note-taking setup (`Matta-agenda.md`, `PROJECTS.md`, `TEAM.md`) rather than general-purpose dev skills — kept in this repo for the same build/install pipeline, not because they're broadly reusable.
 
 Agent definitions live alongside them in [`agents/`](agents/): `autoplan`, `github-orchestrator-agent`, `github-worker-agent`, `planner-codex`, `plan-writer` and `search-grounding`.
 
