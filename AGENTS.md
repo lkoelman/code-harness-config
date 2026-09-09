@@ -68,15 +68,9 @@
 
 Before making changes, read ARCHITECTURE.md and README.md files for the components you are working on.
 
-## Git Conventions
+## Compatibility
 
-**Commit workflow:**
-- Agent proposes commit messages; user retains final edit/approval
-- **NEVER commit, push, or run destructive git commands without explicit user permission**
-- **NEVER update git config without explicit user permission**
-- **NEVER run force push, hard reset, or other destructive git operations without explicit user approval**
-- **NEVER skip hooks** (--no-verify, --no-gpg-sign) unless explicitly requested
-
+All scripts should be compatible with Debian / Ubuntu using the bash shell, and Mac OS using zsh shell.
 
 ## Documentation Maintenance
 
