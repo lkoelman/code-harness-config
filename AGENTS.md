@@ -1,41 +1,9 @@
 
 # Rules
 
-## Test-Driven Development (TDD) Workflow
+## Test-Driven Development (TDD)
 
 **Strong preference for TDD**; Agent should guide this workflow proactively.
-
-### TDD Steps
-
-1. **Write failing test first** (before any implementation)
-   - Add test case to appropriate test file in package
-   - Run pytest to confirm test fails with expected error
-   - Commit the failing test (optional but recommended for clarity)
-
-2. **Implement minimal code to pass test**
-   - Write only enough code to make the test pass
-   - Avoid over-engineering or extra features
-
-3. **Run tests again**
-   - pytest should now pass
-   - If not, iterate on implementation
-
-4. **Refactor if needed**
-   - Keep tests passing while improving code
-   - Run pytest after each refactor
-
-5. **Repeat for next behavior**
-
-**When TDD is impractical:**
-- Document why (e.g., characterization test requires understanding existing behavior first)
-- Use characterization tests: write tests that capture current behavior, then refactor safely
-- Still aim for test coverage of new/changed code
-
-**Test coverage expectations:**
-- New behavior: must have tests
-- Bug fixes: add regression test that would have caught the bug
-- Refactors: existing tests must still pass; add tests if coverage gaps exist
-
 
 ## Editing and Change Discipline
 
