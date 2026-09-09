@@ -6,7 +6,8 @@ description: >
   goals in the current session. Use whenever Lucas says "log this in my agenda",
   "add an agenda entry", "update my agenda", "note this in Matta-agenda", or
   wants today's coding progress recorded in his journal. Edits only the target
-  date's section — never reads or rewrites the rest of the file. Distinct from
+  date's section, inside a subsection marked as agent-written — never edits
+  Lucas's own lines and never reads or rewrites the rest of the file. Distinct from
   daily-checkin, which runs in the notes workspace and reads Linear; this skill
   runs from a code repo and records what just happened in this session.
 ---
@@ -84,12 +85,15 @@ Summarize what actually moved in this coding session, in **1–2 short
 paragraphs**: what was worked on, what changed, where things stand. Skip
 anything that isn't about progress — no "had a productive session!" filler.
 
-- **If today's section already has an entry:** weave the new progress into it —
-  add a clause or a sentence, don't tack on another paragraph. Keep the total at
-  1–2 paragraphs, not a growing list of updates through the day.
+- **Where it goes:** always inside a `#### Session summary (agent)` subsection at
+  the end of the day's section. Lucas's own lines — tasks, checkboxes, notes — are
+  never edited, reordered, ticked or reworded. The journal stays his.
+- **If the agent subsection already exists today:** weave the new progress into
+  it — add a clause or a sentence, don't tack on another paragraph. Keep the total
+  at 1–2 paragraphs, not a growing list of updates through the day.
 - **If the session involved more than a short paragraph's worth of reasoning** —
   a real design decision, a tricky fix worth remembering why, a tradeoff — call
-  `capture-session` first to write the fuller record to
+  `org-capture-coding-session` first to write the fuller record to
   `copilot-sessions/matta-coding/`, then keep the agenda entry itself short and
   reference that file instead of duplicating its detail: *"Details:
   `copilot-sessions/matta-coding/2026-09-08-jetson-power-mode.md`."*
@@ -99,8 +103,12 @@ anything that isn't about progress — no "had a productive session!" filler.
 Apply the change using only the boundary determined in step 3 — the exact day
 heading and its section, nothing else:
 
-- **Updating an existing section:** use the exact text read in step 4 as the
-  anchor for the replacement, so the match is guaranteed to be that one location.
+- **Updating the existing agent subsection:** use the exact text read in step 4 as
+  the anchor for the replacement, so the match is guaranteed to be that one
+  location.
+- **Day exists, no agent subsection yet:** insert `#### Session summary (agent)` and
+  the text at the end of the day's range (just before the next heading at the same
+  or shallower level), after Lucas's own content.
 - **Inserting a new day heading:** anchor the insertion on a line whose exact
   position is already known from the heading map (e.g. the line just before the
   next heading, or the parent week heading). Before editing, confirm the anchor
@@ -116,7 +124,8 @@ predicted.
 ## Output
 
 ```
-Updated Matta-agenda.md — [date] under [week heading].
+Updated Matta-agenda.md — [date] under [week heading], subsection
+`#### Session summary (agent)`.
 
 [the entry as it now reads]
 
