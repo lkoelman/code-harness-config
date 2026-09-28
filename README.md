@@ -70,17 +70,30 @@ No other tooling is required for the build itself — `build.sh`/`install.sh` ar
 
 This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks each skill and agent individually into the harness's config directory — unrelated files already there are left alone. Re-running is safe (idempotent) and picks up any changes after a `git pull`.
 
-| Harness | Skills | Agents | Notes |
-|---|---|---|---|
-| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | No agent headers are defined yet, so no agents install here. Also symlinks `harnesses/claude/output-styles/*.md` to `~/.claude/output-styles/<name>.md`. |
-| Codex CLI | `~/.codex/skills/<name>` | — | Codex doesn't support markdown subagent definitions. |
-| Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | Run `/skills reload` after installing/updating. |
-| OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | Native path, not `~/.opencode/`. |
-| pi-agent | `~/.pi/agent/skills/<name>` | `~/.pi/agent/agents/<name>.md` | Also symlinks `harnesses/pi-agent/settings.json` to `~/.pi/agent/settings.json`. |
+| Harness | Skills | Agents | With `--project <p>` | Notes |
+|---|---|---|---|---|
+| Claude Code | `~/.claude/skills/<name>` | `~/.claude/agents/<name>.md` | `<p>/.claude/{skills,agents,output-styles}` | No agent headers are defined yet, so no agents install here. Also symlinks `harnesses/claude/output-styles/*.md` to `~/.claude/output-styles/<name>.md`. |
+| Codex CLI | `~/.codex/skills/<name>` | — | `<p>/.agents/skills` | Codex doesn't support markdown subagent definitions. |
+| Gemini CLI | `~/.gemini/skills/<name>` | `~/.gemini/agents/<name>.md` | `<p>/.gemini/{skills,agents}` | Run `/skills reload` after installing/updating. |
+| OpenCode | `~/.config/opencode/skills/<name>` | `~/.config/opencode/agents/<name>.md` | `<p>/.opencode/{skills,agents}` | Native path, not `~/.opencode/`. |
+| pi-agent | `~/.pi/agent/skills/<name>` | `~/.pi/agent/agents/<name>.md` | `<p>/.pi/{skills,agents}` | Also symlinks `harnesses/pi-agent/settings.json` to `~/.pi/agent/settings.json`. |
 
 Flags:
 - `--dry-run` — print what would happen without touching `$HOME`.
 - `--force` — replace an existing real (non-symlink) file/dir at an install target; the original is backed up first (`<name>.bak`, or `settings.old.json` for pi-agent's settings file). Without `--force`, install refuses to clobber anything that isn't already one of its own symlinks.
+- `--project <path>` — install into one project instead of `$HOME`, at the relative `PROJECT_SKILLS_DIR` / `PROJECT_AGENTS_DIR` / `PROJECT_OUTPUT_STYLES_DIR` paths in each harness's `.conf` (see the table). `<path>` must contain `.git` or `.claude/`, else install exits with an error. A harness with no `PROJECT_*` paths is skipped. `settings.json` and `CLAUDE.md` are user-level and are never installed into a project.
+- `--skills a,b` — install only these skills (comma-separated names from `skills/`), and no agents, settings, `CLAUDE.md` or output styles.
+- `--output-style` — install only output styles. Combined with `--skills`, installs both the named skills and the output styles.
+- `--exclude-skills a,b` — install everything that would otherwise install, except these skills.
+- `--copy` — copy files instead of symlinking them, e.g. so a project can commit them. Re-running over an identical copy is a no-op; a copy that differs from the build (edited locally, or the source changed) is refused without `--force`, like any real file.
+
+An unknown name in `--skills` / `--exclude-skills` is an error. Skills not selected are left alone, not removed: selection happens at link time, so earlier installs of other skills stay valid.
+
+```bash
+./scripts/install.sh claude --project ~/code/foo --skills unslop,terse-precise
+./scripts/install.sh claude --output-style
+./scripts/install.sh --all --project . --copy --exclude-skills ssh-teleport
+```
 
 To remove everything this repo installed for a harness:
 
@@ -89,7 +102,7 @@ To remove everything this repo installed for a harness:
 # or: ./scripts/uninstall.sh gemini-cli
 ```
 
-Uninstall only ever removes symlinks that resolve back into this repo; it never touches real files.
+Uninstall only ever removes symlinks that resolve back into this repo; it never touches real files. `--project <path>` removes from that project instead of `$HOME`. `--copy` also removes real copies made by `install.sh --copy`, but only copies still identical to a fresh build; an edited copy is kept and reported as `kept modified copy <path>`.
 
 ## Global instructions (`CLAUDE.md`)
 

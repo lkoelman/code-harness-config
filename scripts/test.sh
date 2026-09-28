@@ -137,6 +137,39 @@ Sample style body.
 EOF
 }
 
+# alpha.conf with $HOME paths plus relative PROJECT_* paths, one output-style
+# fixture, skills widget + gadget and agent helper — the full set of
+# categories the --project/--skills/--exclude-skills/--output-style
+# selectors choose between.
+write_alpha_project_fixture() {
+  local sandbox="$1"
+  cat >"$sandbox/harnesses/alpha.conf" <<'EOF'
+SKILLS_DIR="$HOME/.alpha/skills"
+AGENTS_DIR="$HOME/.alpha/agents"
+OUTPUT_STYLES_DIR="$HOME/.alpha/output-styles"
+PROJECT_SKILLS_DIR=".alpha/skills"
+PROJECT_AGENTS_DIR=".alpha/agents"
+PROJECT_OUTPUT_STYLES_DIR=".alpha/output-styles"
+EOF
+  mkdir -p "$sandbox/harnesses/alpha/output-styles"
+  echo "Sample style body." >"$sandbox/harnesses/alpha/output-styles/sample-style.md"
+  local s
+  for s in widget gadget; do
+    mkdir -p "$sandbox/skills/$s"
+    printf -- '---\nname: %s\ndescription: %s things\n---\n\n%s body.\n' "$s" "$s" "$s" >"$sandbox/skills/$s/SKILL.md"
+  done
+  mkdir -p "$sandbox/agents/helper"
+  printf -- '---\ndescription: helps\n---\n\nHelp body.\n' >"$sandbox/agents/helper/AGENT.md"
+  echo "mode: primary" >"$sandbox/agents/helper/header-alpha.yaml"
+}
+
+# A fake project root (has .git/), printed physical path.
+new_project() {
+  local p; p="$(mktemp_d)"; SANDBOXES+=("$p")
+  mkdir -p "$p/.git"
+  echo "$p"
+}
+
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough() {
   local name="build: splices frontmatter, preserves body, copies supporting files"
@@ -594,6 +627,162 @@ EOF
   fi
   [ -e "$removed" ] && { fail "$name (stale other-style symlink not pruned)"; return; }
   [ -L "$kept" ] || { fail "$name (sample-style symlink pruned by mistake)"; return; }
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_project_requires_root() {
+  local name="install: --project refuses a dir without .git or .claude/, accepts .claude/ alone"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_project_fixture "$sandbox"
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
+  local proj; proj="$(mktemp_d)"; SANDBOXES+=("$proj")
+
+  if HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh should have refused a non-project dir)"; return
+  fi
+  grep -q '\.git' "$sandbox/install.log" || { fail "$name (error doesn't mention .git)"; return; }
+  [ -e "$proj/.alpha" ] && { fail "$name (created files in a non-project dir)"; return; }
+
+  mkdir -p "$proj/.claude"
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" >"$sandbox/install2.log" 2>&1; then
+    fail "$name (install.sh should accept a dir with .claude/)"; cat "$sandbox/install2.log"; return
+  fi
+  [ -L "$proj/.alpha/skills/widget" ] || { fail "$name (skill not installed into .claude/-only project)"; return; }
+
+  if HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project >"$sandbox/install3.log" 2>&1; then
+    fail "$name (--project with no value should fail)"; return
+  fi
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_project_symlinks_and_uninstall() {
+  local name="install/uninstall: --project links into <project>/PROJECT_* dirs, not HOME"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_project_fixture "$sandbox"
+  write_beta_conf "$sandbox"
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
+  local proj; proj="$(new_project)"
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha beta --project "$proj" >"$sandbox/install.log" 2>&1; then
+    fail "$name (install.sh exited nonzero)"; cat "$sandbox/install.log"; return
+  fi
+  [ -L "$proj/.alpha/skills/widget" ] || { fail "$name (skill not linked into project)"; return; }
+  [ -L "$proj/.alpha/agents/helper.md" ] || { fail "$name (agent not linked into project)"; return; }
+  [ -L "$proj/.alpha/output-styles/sample-style.md" ] || { fail "$name (output style not linked into project)"; return; }
+  [ -e "$fake_home/.alpha" ] && { fail "$name (project install wrote under HOME)"; return; }
+  grep -q 'skipping beta' "$sandbox/install.log" || { fail "$name (harness without PROJECT_* not reported as skipped)"; return; }
+  [ -e "$proj/.beta" ] && { fail "$name (harness without PROJECT_* installed anyway)"; return; }
+
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha beta --project "$proj" >"$sandbox/uninstall.log" 2>&1; then
+    fail "$name (uninstall.sh exited nonzero)"; cat "$sandbox/uninstall.log"; return
+  fi
+  [ -e "$proj/.alpha/skills/widget" ] && { fail "$name (skill link still present after uninstall)"; return; }
+  [ -e "$proj/.alpha/agents/helper.md" ] && { fail "$name (agent link still present after uninstall)"; return; }
+  [ -e "$proj/.alpha/output-styles/sample-style.md" ] && { fail "$name (output style link still present after uninstall)"; return; }
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_skill_selectors() {
+  local name="install: --skills / --exclude-skills / --output-style narrow what installs"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_project_fixture "$sandbox"
+  local h
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --skills widget >"$sandbox/i1.log" 2>&1; then
+    fail "$name (--skills exited nonzero)"; cat "$sandbox/i1.log"; return
+  fi
+  [ -L "$h/.alpha/skills/widget" ] || { fail "$name (--skills: selected skill missing)"; return; }
+  [ -e "$h/.alpha/skills/gadget" ] && { fail "$name (--skills: unselected skill installed)"; return; }
+  [ -e "$h/.alpha/agents" ] && { fail "$name (--skills: agents installed)"; return; }
+  [ -e "$h/.alpha/output-styles" ] && { fail "$name (--skills: output styles installed)"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --exclude-skills widget >"$sandbox/i2.log" 2>&1; then
+    fail "$name (--exclude-skills exited nonzero)"; cat "$sandbox/i2.log"; return
+  fi
+  [ -e "$h/.alpha/skills/widget" ] && { fail "$name (--exclude-skills: excluded skill installed)"; return; }
+  [ -L "$h/.alpha/skills/gadget" ] || { fail "$name (--exclude-skills: other skill missing)"; return; }
+  [ -L "$h/.alpha/agents/helper.md" ] || { fail "$name (--exclude-skills: agent missing)"; return; }
+  [ -L "$h/.alpha/output-styles/sample-style.md" ] || { fail "$name (--exclude-skills: output style missing)"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --output-style >"$sandbox/i3.log" 2>&1; then
+    fail "$name (--output-style exited nonzero)"; cat "$sandbox/i3.log"; return
+  fi
+  [ -L "$h/.alpha/output-styles/sample-style.md" ] || { fail "$name (--output-style: style missing)"; return; }
+  [ -e "$h/.alpha/skills" ] && { fail "$name (--output-style: skills installed)"; return; }
+  [ -e "$h/.alpha/agents" ] && { fail "$name (--output-style: agents installed)"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --output-style --skills widget >"$sandbox/i4.log" 2>&1; then
+    fail "$name (--output-style --skills exited nonzero)"; cat "$sandbox/i4.log"; return
+  fi
+  [ -L "$h/.alpha/output-styles/sample-style.md" ] || { fail "$name (union: style missing)"; return; }
+  [ -L "$h/.alpha/skills/widget" ] || { fail "$name (union: skill missing)"; return; }
+  [ -e "$h/.alpha/agents" ] && { fail "$name (union: agents installed)"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if HOME="$h" "$sandbox/scripts/install.sh" alpha --skills widget,nosuch >"$sandbox/i5.log" 2>&1; then
+    fail "$name (--skills with unknown name should fail)"; return
+  fi
+  grep -q nosuch "$sandbox/i5.log" || { fail "$name (error doesn't name the unknown skill)"; return; }
+  [ -e "$h/.alpha" ] && { fail "$name (unknown skill still installed something)"; return; }
+  if HOME="$h" "$sandbox/scripts/install.sh" alpha --exclude-skills nosuch >"$sandbox/i6.log" 2>&1; then
+    fail "$name (--exclude-skills with unknown name should fail)"; return
+  fi
+
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
+test_install_copy_mode() {
+  local name="install/uninstall: --copy writes real files, idempotent, guards edits, removes only unmodified copies"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_project_fixture "$sandbox"
+  local fake_home; fake_home="$(mktemp_d)"; SANDBOXES+=("$fake_home")
+  local proj; proj="$(new_project)"
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" --copy >"$sandbox/c1.log" 2>&1; then
+    fail "$name (install --copy exited nonzero)"; cat "$sandbox/c1.log"; return
+  fi
+  local skill="$proj/.alpha/skills/widget" gadget="$proj/.alpha/skills/gadget"
+  [ -d "$skill" ] && [ ! -L "$skill" ] || { fail "$name (skill not a real dir)"; return; }
+  [ -f "$proj/.alpha/agents/helper.md" ] && [ ! -L "$proj/.alpha/agents/helper.md" ] || { fail "$name (agent not a real file)"; return; }
+  [ -f "$proj/.alpha/output-styles/sample-style.md" ] && [ ! -L "$proj/.alpha/output-styles/sample-style.md" ] || { fail "$name (style not a real file)"; return; }
+  grep -qx 'widget body.' "$skill/SKILL.md" || { fail "$name (copied skill content wrong)"; return; }
+
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" --copy >"$sandbox/c2.log" 2>&1; then
+    fail "$name (re-install --copy exited nonzero)"; cat "$sandbox/c2.log"; return
+  fi
+  [ -n "$(find "$proj/.alpha" -name '*.bak*')" ] && { fail "$name (re-install of identical copy made a backup)"; return; }
+
+  echo "local edit" >>"$skill/SKILL.md"
+  if HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" --copy >"$sandbox/c3.log" 2>&1; then
+    fail "$name (re-install over an edited copy should refuse without --force)"; return
+  fi
+  grep -q 'local edit' "$skill/SKILL.md" || { fail "$name (edited copy clobbered without --force)"; return; }
+  if ! HOME="$fake_home" "$sandbox/scripts/install.sh" alpha --project "$proj" --copy --force >"$sandbox/c4.log" 2>&1; then
+    fail "$name (install --copy --force exited nonzero)"; cat "$sandbox/c4.log"; return
+  fi
+  grep -q 'local edit' "$skill/SKILL.md" && { fail "$name (--force didn't replace the edited copy)"; return; }
+  grep -q 'local edit' "$proj/.alpha/skills/widget.bak/SKILL.md" 2>/dev/null || { fail "$name (--force didn't back up the edited copy)"; return; }
+
+  echo "local edit" >>"$gadget/SKILL.md"
+  if ! HOME="$fake_home" "$sandbox/scripts/uninstall.sh" alpha --project "$proj" --copy >"$sandbox/u1.log" 2>&1; then
+    fail "$name (uninstall --copy exited nonzero)"; cat "$sandbox/u1.log"; return
+  fi
+  [ -e "$skill" ] && { fail "$name (unmodified copy not removed)"; return; }
+  [ -e "$proj/.alpha/agents/helper.md" ] && { fail "$name (unmodified agent copy not removed)"; return; }
+  [ -e "$proj/.alpha/output-styles/sample-style.md" ] && { fail "$name (unmodified style copy not removed)"; return; }
+  grep -q 'local edit' "$gadget/SKILL.md" 2>/dev/null || { fail "$name (modified copy removed)"; return; }
+  grep -q 'kept modified copy' "$sandbox/u1.log" || { fail "$name (kept copy not reported)"; return; }
 
   pass "$name"
 }
@@ -1524,6 +1713,10 @@ test_install_claude_md_symlink
 test_install_claude_md_guardrail_and_force
 test_install_output_styles_symlink
 test_install_output_styles_prune_stale
+test_install_project_requires_root
+test_install_project_symlinks_and_uninstall
+test_install_skill_selectors
+test_install_copy_mode
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes
 test_pr_signals_shape
