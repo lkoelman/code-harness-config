@@ -65,7 +65,7 @@ No other tooling is required for the build itself — `build.sh`/`install.sh` ar
 ```bash
 ./scripts/install.sh --all
 # or install/update just one harness:
-./scripts/install.sh opencode
+./scripts/install.sh claude [--project <path>] [--copy]
 ```
 
 This builds `build/<harness>/...` from `skills/` and `agents/`, then symlinks each skill and agent individually into the harness's config directory — unrelated files already there are left alone. Re-running is safe (idempotent) and picks up any changes after a `git pull`.
