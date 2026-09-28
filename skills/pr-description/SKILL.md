@@ -5,7 +5,7 @@ description: Write a PR description
 
 Write a PR description following code review best practices. Make the information digestible; prevent information overload for reviewers.
 
-Don't write full English sentences except at the beginning of a paragraph. Prefer shorthand, bullet points, and nested lists.
+Prefer shorthand, bullet points, and nested lists over full sentences in the body of a section. Always lead a section with full sentences before using shorthand.
 
 Use GitHub collapsed sections (`<details>` and `<summary>` blocks) to include additional information in complex PRs. For example, include Mermaid flowcharts to clarify complex logic spread over many files or lines.
 
