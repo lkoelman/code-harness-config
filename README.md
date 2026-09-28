@@ -2,6 +2,19 @@
 
 **Write a skill once, run it in every coding agent you use.** Claude Code, Codex CLI, Gemini CLI, OpenCode and pi-agent each want their own config directory and their own frontmatter dialect — so the same prompt ends up copy-pasted five times and drifts in four of them. This repo keeps one canonical copy of each skill and agent, splices in whatever per-harness metadata is needed at build time, and symlinks the result into place. Edit the source, re-run `install.sh`, and every harness is up to date.
 
+## Installing TLDR
+
+```bash
+# install prerequisites: gh, jq, etc.
+./scripts/install-prerequisites.sh
+# install all skills and output styles:
+./scripts/install.sh --all
+# or install/update just one harness:
+./scripts/install.sh claude [--project <path>] [--copy]
+```
+
+See all options in [Installation](#installing)
+
 ## Skills
 
 | Skill | What it does |
