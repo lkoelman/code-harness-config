@@ -82,17 +82,18 @@ Flags:
 - `--dry-run` — print what would happen without touching `$HOME`.
 - `--force` — replace an existing real (non-symlink) file/dir at an install target; the original is backed up first (`<name>.bak`, or `settings.old.json` for pi-agent's settings file). Without `--force`, install refuses to clobber anything that isn't already one of its own symlinks.
 - `--project <path>` — install into one project instead of `$HOME`, at the relative `PROJECT_SKILLS_DIR` / `PROJECT_AGENTS_DIR` / `PROJECT_OUTPUT_STYLES_DIR` paths in each harness's `.conf` (see the table). `<path>` must contain `.git` or `.claude/`, else install exits with an error. A harness with no `PROJECT_*` paths is skipped. `settings.json` and `CLAUDE.md` are user-level and are never installed into a project.
-- `--skills a,b` — install only these skills (comma-separated names from `skills/`), and no agents, settings, `CLAUDE.md` or output styles.
+- `--skills a,b` — install only these skills (comma-separated names from `skills/`, or shell glob patterns such as `'org-*'`), and no agents, settings, `CLAUDE.md` or output styles.
 - `--output-style` — install only output styles. Combined with `--skills`, installs both the named skills and the output styles.
-- `--exclude-skills a,b` — install everything that would otherwise install, except these skills.
+- `--exclude-skills a,b` — install everything that would otherwise install, except these skills (names or glob patterns, as for `--skills`).
 - `--copy` — copy files instead of symlinking them, e.g. so a project can commit them. Re-running over an identical copy is a no-op; a copy that differs from the build (edited locally, or the source changed) is refused without `--force`, like any real file.
 
-An unknown name in `--skills` / `--exclude-skills` is an error. Skills not selected are left alone, not removed: selection happens at link time, so earlier installs of other skills stay valid.
+Quote glob patterns (`'org-*'`) so your shell passes them through unexpanded. A name or pattern in `--skills` / `--exclude-skills` that matches no skill is an error. Skills not selected are left alone, not removed: selection happens at link time, so earlier installs of other skills stay valid.
 
 ```bash
 ./scripts/install.sh claude --project ~/code/foo --skills unslop,terse-precise
 ./scripts/install.sh claude --output-style
 ./scripts/install.sh --all --project . --copy --exclude-skills ssh-teleport
+./scripts/install.sh --all --exclude-skills 'org-*'
 ```
 
 To remove everything this repo installed for a harness:

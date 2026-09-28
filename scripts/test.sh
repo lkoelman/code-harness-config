@@ -742,6 +742,58 @@ test_install_skill_selectors() {
 }
 
 # ---------------------------------------------------------------------------
+test_install_skill_patterns() {
+  local name="install: --skills / --exclude-skills entries are glob patterns"
+  local sandbox; sandbox="$(new_sandbox)"
+  write_alpha_project_fixture "$sandbox"
+  mkdir -p "$sandbox/skills/org-one"
+  printf -- '---\nname: org-one\ndescription: org things\n---\n\nOrg body.\n' >"$sandbox/skills/org-one/SKILL.md"
+  local h
+
+  # Run from a cwd holding a file that matches the pattern, so a pattern the
+  # script itself glob-expands against the filesystem would turn into 'org-x'.
+  local cwd; cwd="$(mktemp_d)"; SANDBOXES+=("$cwd")
+  touch "$cwd/org-x"
+  cd "$cwd" || { fail "$name (cd failed)"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --exclude-skills 'org-*' >"$sandbox/p1.log" 2>&1; then
+    fail "$name (--exclude-skills 'org-*' exited nonzero)"; cat "$sandbox/p1.log"; cd "$REPO"; return
+  fi
+  [ -e "$h/.alpha/skills/org-one" ] && { fail "$name (--exclude-skills 'org-*': org-one installed)"; cd "$REPO"; return; }
+  [ -L "$h/.alpha/skills/widget" ] || { fail "$name (--exclude-skills 'org-*': widget missing)"; cd "$REPO"; return; }
+  [ -L "$h/.alpha/skills/gadget" ] || { fail "$name (--exclude-skills 'org-*': gadget missing)"; cd "$REPO"; return; }
+  [ -L "$h/.alpha/agents/helper.md" ] || { fail "$name (--exclude-skills 'org-*': agent missing)"; cd "$REPO"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --skills 'w*' >"$sandbox/p2.log" 2>&1; then
+    fail "$name (--skills 'w*' exited nonzero)"; cat "$sandbox/p2.log"; cd "$REPO"; return
+  fi
+  [ -L "$h/.alpha/skills/widget" ] || { fail "$name (--skills 'w*': widget missing)"; cd "$REPO"; return; }
+  [ -e "$h/.alpha/skills/gadget" ] && { fail "$name (--skills 'w*': gadget installed)"; cd "$REPO"; return; }
+  [ -e "$h/.alpha/skills/org-one" ] && { fail "$name (--skills 'w*': org-one installed)"; cd "$REPO"; return; }
+  [ -e "$h/.alpha/agents" ] && { fail "$name (--skills 'w*': agents installed)"; cd "$REPO"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if ! HOME="$h" "$sandbox/scripts/install.sh" alpha --skills 'widget,g?dget' >"$sandbox/p3.log" 2>&1; then
+    fail "$name (--skills 'widget,g?dget' exited nonzero)"; cat "$sandbox/p3.log"; cd "$REPO"; return
+  fi
+  [ -L "$h/.alpha/skills/widget" ] || { fail "$name (mixed list: widget missing)"; cd "$REPO"; return; }
+  [ -L "$h/.alpha/skills/gadget" ] || { fail "$name (mixed list: gadget missing)"; cd "$REPO"; return; }
+  [ -e "$h/.alpha/skills/org-one" ] && { fail "$name (mixed list: org-one installed)"; cd "$REPO"; return; }
+
+  h="$(mktemp_d)"; SANDBOXES+=("$h")
+  if HOME="$h" "$sandbox/scripts/install.sh" alpha --skills 'nosuch-*' >"$sandbox/p4.log" 2>&1; then
+    fail "$name (--skills with a pattern matching nothing should fail)"; cd "$REPO"; return
+  fi
+  grep -qF 'nosuch-*' "$sandbox/p4.log" || { fail "$name (error doesn't name the unmatched pattern)"; cd "$REPO"; return; }
+  [ -e "$h/.alpha" ] && { fail "$name (unmatched pattern still installed something)"; cd "$REPO"; return; }
+
+  cd "$REPO" || true
+  pass "$name"
+}
+
+# ---------------------------------------------------------------------------
 test_install_copy_mode() {
   local name="install/uninstall: --copy writes real files, idempotent, guards edits, removes only unmodified copies"
   local sandbox; sandbox="$(new_sandbox)"
@@ -1716,6 +1768,7 @@ test_install_output_styles_prune_stale
 test_install_project_requires_root
 test_install_project_symlinks_and_uninstall
 test_install_skill_selectors
+test_install_skill_patterns
 test_install_copy_mode
 test_pr_state_lifecycle
 test_poll_pr_reports_only_changes

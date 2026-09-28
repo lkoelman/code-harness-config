@@ -7,7 +7,8 @@
 # the harness .conf) instead of $HOME; settings.json and CLAUDE.md are never
 # installed into a project. --skills/--output-style narrow the install to
 # those categories (both: the union); --exclude-skills drops skills from
-# whatever else installs. --copy copies instead of symlinking.
+# whatever else installs; entries of both are comma-separated shell glob
+# patterns (e.g. 'org-*'). --copy copies instead of symlinking.
 #
 # Usage: scripts/install.sh (--all|<harness>...) [--project <path>]
 #          [--skills a,b] [--exclude-skills a,b] [--output-style]
@@ -99,15 +100,33 @@ if [ -n "$PROJECT" ]; then
   PROJECT="$(cd "$PROJECT" && pwd -P)"
 fi
 
-# in_list <name> <comma-list>
+# in_list <name> <comma-list>: true if <name> matches any entry of the list,
+# each a shell glob pattern (`*`, `?`, `[...]`). The list is split with
+# parameter expansion rather than word splitting, so a pattern is never
+# glob-expanded against the filesystem.
 in_list() {
-  case ",$2," in *",$1,"*) return 0 ;; esac
+  local rest="$2," pat
+  while [ -n "$rest" ]; do
+    pat="${rest%%,*}"; rest="${rest#*,}"
+    # $pat unquoted: matched as a glob pattern, not a literal string.
+    # shellcheck disable=SC2254
+    case "$1" in $pat) return 0 ;; esac
+  done
   return 1
 }
 
-for name in $(tr ',' ' ' <<<"$ONLY_SKILLS $EXCLUDE_SKILLS"); do
-  if [ ! -f "$REPO/skills/$name/SKILL.md" ]; then
-    echo "error: unknown skill '$name' (no skills/$name/SKILL.md)" >&2
+# Every --skills / --exclude-skills pattern must match at least one skill.
+rest="$ONLY_SKILLS,$EXCLUDE_SKILLS,"
+while [ -n "$rest" ]; do
+  pat="${rest%%,*}"; rest="${rest#*,}"
+  [ -n "$pat" ] || continue
+  matched=0
+  for skill_md in "$REPO"/skills/*/SKILL.md; do
+    [ -e "$skill_md" ] || continue
+    if in_list "$(basename "$(dirname "$skill_md")")" "$pat"; then matched=1; break; fi
+  done
+  if [ "$matched" -eq 0 ]; then
+    echo "error: no skill matches '$pat' (no skills/<name>/SKILL.md)" >&2
     exit 1
   fi
 done
