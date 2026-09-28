@@ -19,14 +19,19 @@ See all options in [Installation](#installing)
 
 | Skill | What it does |
 |---|---|
+| **Pull requests** | |
 | [`autofix-pr-local`](skills/autofix-pr-local/SKILL.md) | Shepherds an open PR to green from your machine: loops over failing CI checks, reviewer and bot comments, and base-branch conflicts, fixing the highest-priority signal and committing one fix per issue. |
 | [`grill-for-pr`](skills/grill-for-pr/SKILL.md) | Interviews you for the context a diff can't show, then writes a PR title and description engineered for reviewer buy-in — honest, persuasive, and short enough to actually get read. |
-| [`ssh-teleport`](skills/ssh-teleport/SKILL.md) | Moves the current Claude Code session to another machine — transcript, tool results, plan, file history and working tree — landing in a fresh worktree there. `--summary` sends the code plus a written handoff instead, for a teammate or a fresh session. |
+| [`pr-description`](skills/pr-description/SKILL.md) | Writes a PR description following code review best practices: shorthand, bullet points and nested lists sized to avoid overloading reviewers. |
+| **Engineering & planning** | |
 | [`document-architecture`](skills/document-architecture/SKILL.md) | Generates an `ARCHITECTURE.md` for an existing codebase, written as an onboarding entry point for both new developers and coding agents. |
+| [`step-back`](skills/step-back/SKILL.md) | Re-evaluates a question, plan, design or piece of code from a staff engineer's perspective, and pushes back when the wrong problem is being solved or a workaround hides the root cause. |
 | [`handoff-doc`](skills/handoff-doc/SKILL.md) | Write handoff document so you can /clear or /compact the context window and the next agent can continue the session. |
+| **Writing** | |
 | [`unslop`](skills/unslop/SKILL.md) | Rewrites existing text to name mechanisms instead of metaphors, qualify ambiguous technical nouns, and replace unmeasurable claims with values. Sources every rewrite from the code rather than inventing a mechanism it cannot verify. |
 | [`terse-precise`](skills/terse-precise/SKILL.md) | Writes or rewrites text to the terse, technically precise standard optimized for skimming: name the file, function, condition and effect instead of a metaphor, qualify every ambiguous technical noun, and state both ends of relational jargon. |
 | [`claudish-to-english`](skills/claudish-to-english/SKILL.md) | Paraphrases Claude's characteristic prose — contrast-heavy, metaphorical, restatement-prone — into plain English, collapsing repeated propositions and lowering the abstraction level while preserving every fact and logical scope. |
+| **Personal workflow** | |
 | [`org-agenda-entry`](skills/org-agenda-entry/SKILL.md) | Adds or updates today's (or a requested date's) entry in `Matta-agenda.md` from within a coding session, summarizing progress toward project goals. Edits only the target date's section. |
 | [`org-capture-coding-session`](skills/org-capture-coding-session/SKILL.md) | Summarizes a coding or design session into a dated decision log, and links it from the relevant project in `PROJECTS.md`. |
 | [`org-daily-checkin`](skills/org-daily-checkin/SKILL.md) | Runs a weekday morning check-in: today's agenda entry, Linear issues needing attention, and anything worth flagging before the day starts. |
@@ -59,8 +64,7 @@ A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`descri
 - [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) (`gh`) — used by the `grill-for-pr` skill and the GitHub-driven agents.
 - The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
 - The [`gh-webhook`](https://github.com/cli/gh-webhook) extension, only if you want push-style GitHub event forwarding instead of polling: `gh extension install cli/gh-webhook`. Note it needs admin rights on the repo to register the webhook, plus a local HTTP receiver.
-- `jq` — used by the `autofix-pr-local`, `grill-for-pr` and `ssh-teleport` skills to read structured JSON.
-- `rsync` — used by the `ssh-teleport` skill to move session data between machines. **On the target** it needs `rsync`, `jq` and `git` in every mode, plus `claude` at a version matching the source for anything but a `--summary` handoff; and, so the target can pull from `origin` without credentials of its own, a local `ssh-agent` holding a usable key (`ssh-add -l`) plus `AllowAgentForwarding` enabled on the target.
+- `jq` — used by the `autofix-pr-local` and `grill-for-pr` skills to read structured JSON.
 
 To install all of the above:
 
@@ -105,7 +109,7 @@ Quote glob patterns (`'org-*'`) so your shell passes them through unexpanded. A 
 ```bash
 ./scripts/install.sh claude --project ~/code/foo --skills unslop,terse-precise
 ./scripts/install.sh claude --output-style
-./scripts/install.sh --all --project . --copy --exclude-skills ssh-teleport
+./scripts/install.sh --all --project . --copy --exclude-skills step-back
 ./scripts/install.sh --all --exclude-skills 'org-*'
 ```
 
