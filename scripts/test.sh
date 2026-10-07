@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Tests for scripts/build.sh, install.sh, uninstall.sh, and the scripts bundled
-# with the autofix-pr-local and grill-for-pr skills.
+# with the autofix-pr-local, grill-for-pr and zotero-local skills.
 # Each test runs against a throwaway sandbox copy of the scripts plus
 # fixture skills/agents/harnesses, so nothing here touches the real
 # skills/ or agents/ tree or the real $HOME. The skill-script tests add a
 # throwaway git repo and a mock `gh` on $PATH, so they never hit the network.
+# The zotero-local tests live in scripts/test_zotero_local.py and run against
+# a mock Zotero local API on 127.0.0.1, never a real Zotero.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -168,6 +170,18 @@ new_project() {
   local p; p="$(mktemp_d)"; SANDBOXES+=("$p")
   mkdir -p "$p/.git"
   echo "$p"
+}
+
+test_zotero_local_cli() {
+  local name="skill zotero-local: zotero.py against a mock local API"
+  local out
+  if ! command -v python3 >/dev/null 2>&1; then
+    fail "$name (python3 not found)"; return
+  fi
+  # -I: ignore PYTHON* env vars and keep cwd off sys.path.
+  out="$(python3 -I "$REPO/scripts/test_zotero_local.py" 2>&1)" \
+    || { echo "$out"; fail "$name"; return; }
+  pass "$name"
 }
 
 # ---------------------------------------------------------------------------
@@ -1259,6 +1273,18 @@ test_pr_recon_past_argv_cap() {
   pass "$name"
 }
 
+test_zotero_local_cli() {
+  local name="skill zotero-local: zotero.py against a mock local API"
+  local out
+  if ! command -v python3 >/dev/null 2>&1; then
+    fail "$name (python3 not found)"; return
+  fi
+  # -I: ignore PYTHON* env vars and keep cwd off sys.path.
+  out="$(python3 -I "$REPO/scripts/test_zotero_local.py" 2>&1)" \
+    || { echo "$out"; fail "$name"; return; }
+  pass "$name"
+}
+
 # ---------------------------------------------------------------------------
 test_splice_and_passthrough
 test_harnesses_targeting
@@ -1284,6 +1310,7 @@ test_pr_signals_shape
 test_pr_signals_past_argv_cap
 test_pr_recon_shape
 test_pr_recon_past_argv_cap
+test_zotero_local_cli
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

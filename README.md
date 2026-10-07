@@ -31,6 +31,8 @@ See all options in [Installation](#installing)
 | [`unslop`](skills/unslop/SKILL.md) | Rewrites existing text to name mechanisms instead of metaphors, qualify ambiguous technical nouns, and replace unmeasurable claims with values. Sources every rewrite from the code rather than inventing a mechanism it cannot verify. |
 | [`terse-precise`](skills/terse-precise/SKILL.md) | Writes or rewrites text to the terse, technically precise standard optimized for skimming: name the file, function, condition and effect instead of a metaphor, qualify every ambiguous technical noun, and state both ends of relational jargon. |
 | [`claudish-to-english`](skills/claudish-to-english/SKILL.md) | Paraphrases Claude's characteristic prose — contrast-heavy, metaphorical, restatement-prone — into plain English, collapsing repeated propositions and lowering the abstraction level while preserving every fact and logical scope. |
+| **Research** | |
+| [`zotero-local`](skills/zotero-local/SKILL.md) | Searches and reads your local Zotero library through Zotero's local HTTP API: find papers by title, tag, collection or full text; read metadata, notes and indexed PDF text; get local PDF paths; export BibTeX; format citations. Read-only. |
 | **Personal workflow** | |
 | [`org-agenda-entry`](skills/org-agenda-entry/SKILL.md) | Adds or updates today's (or a requested date's) entry in `Matta-agenda.md` from within a coding session, summarizing progress toward project goals. Edits only the target date's section. |
 | [`org-capture-coding-session`](skills/org-capture-coding-session/SKILL.md) | Summarizes a coding or design session into a dated decision log, and links it from the relevant project in `PROJECTS.md`. |
@@ -65,6 +67,7 @@ A `SKILL.md` or `AGENT.md` holds the harness-neutral frontmatter (`name`/`descri
 - The [`gh-pr-review`](https://github.com/agynio/gh-pr-review) extension, for inline PR review comment workflows: `gh extension install agynio/gh-pr-review`.
 - The [`gh-webhook`](https://github.com/cli/gh-webhook) extension, only if you want push-style GitHub event forwarding instead of polling: `gh extension install cli/gh-webhook`. Note it needs admin rights on the repo to register the webhook, plus a local HTTP receiver.
 - `jq` — used by the `autofix-pr-local` and `grill-for-pr` skills to read structured JSON.
+- `python3` (standard library only) and [Zotero](https://www.zotero.org/download/) 7 or later, running, with *Settings → Advanced → Allow other applications on this computer to communicate with Zotero* checked — used by the `zotero-local` skill. `install-prerequisites.sh` does not install these.
 
 To install all of the above:
 
@@ -159,7 +162,9 @@ This repo ships one: [`terse-precise-technical`](harnesses/claude/output-styles/
 
 ```bash
 ./scripts/test.sh    # exercises build.sh/install.sh/uninstall.sh against throwaway fixtures,
-                     # plus the autofix-pr-local scripts against a mock `gh`
+                     # the autofix-pr-local and grill-for-pr scripts against a mock `gh`,
+                     # and zotero-local's zotero.py against a mock Zotero local API
+                     # (scripts/test_zotero_local.py; run alone with `python3 -I <path> -v`)
 ./scripts/build.sh    # build without installing, e.g. to inspect build/<harness>/...
 ```
 
