@@ -11,8 +11,10 @@ import http.server
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from urllib.parse import parse_qs, urlsplit
@@ -85,31 +87,46 @@ NOTE = {
 
 
 class MockZotero(http.server.ThreadingHTTPServer):
-    """Serves canned responses; records every request as (path, query dict)."""
+    """Serves canned responses.
+
+    Records every request twice: as (path, query dict) in `requests`, and with
+    method, headers and decoded body in `log`.
+    """
 
     def __init__(self):
         super().__init__(("127.0.0.1", 0), Handler)
         self.routes = {}
         self.requests = []
+        self.log = []
 
-    def route(self, path, body, status=200, headers=None, content_type="application/json"):
-        """body may be a callable taking the parsed query and returning (body, headers)."""
-        self.routes[path] = (status, body, headers or {}, content_type)
+    def route(self, path, body, status=200, headers=None, content_type="application/json", method="GET"):
+        """body may be a callable taking (query, request body) and returning (body, headers)."""
+        self.routes[(method, path)] = (status, body, headers or {}, content_type)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
+    def _handle(self):
         parts = urlsplit(self.path)
         query = parse_qs(parts.query)
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+        try:
+            req_body = json.loads(raw) if raw else None
+        except ValueError:
+            req_body = raw
         self.server.requests.append((parts.path, query))
-        if parts.path not in self.server.routes:
+        self.server.log.append(
+            # Header names lowercased: HTTP treats them case-insensitively, and urllib sends "Zotero-server-id".
+            {"method": self.command, "path": parts.path, "query": query, "headers": {k.lower(): v for k, v in self.headers.items()}, "body": req_body}
+        )
+        route = self.server.routes.get((self.command, parts.path))
+        if route is None:
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b"Not found")
             return
-        status, body, headers, content_type = self.server.routes[parts.path]
+        status, body, headers, content_type = route
         if callable(body):
-            body, extra = body(query)
+            body, extra = body(query, req_body)
             headers = {**headers, **extra}
         if not isinstance(body, str):
             body = json.dumps(body)
@@ -122,6 +139,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = _handle
+
     def log_message(self, *args):
         pass
 
@@ -132,13 +151,17 @@ class ZoteroCliTest(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        self.config = tempfile.TemporaryDirectory()
 
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+        self.config.cleanup()
 
-    def run_cli(self, *args, base=None):
-        env = {k: v for k, v in os.environ.items() if k != "ZOTERO_LOCAL_URL"}
+    def run_cli(self, *args, base=None, env_extra=None):
+        env = {k: v for k, v in os.environ.items() if k not in ("ZOTERO_LOCAL_URL", "ZOTERO_LOCAL_API_KEY")}
+        env["XDG_CONFIG_HOME"] = self.config.name
+        env.update(env_extra or {})
         return subprocess.run(
             [sys.executable, "-I", CLI, "--base-url", base or self.base, *args],
             capture_output=True,
@@ -212,8 +235,16 @@ class ZoteroCliTest(unittest.TestCase):
         self.assertIn(LIB + "/collections/R5MINMKC/items/top", self.paths())
         self.assertIn(LIB + "/items", self.paths())
 
+    def test_search_shows_note_as_one_line_of_text(self):
+        note = json.loads(json.dumps(NOTE))
+        note["data"]["note"] = '<div data-schema-version="9"><p>First line</p>\n<p>second</p></div>'
+        self.server.route(LIB + "/items", [note], headers={"Total-Results": "1"})
+        r = self.run_cli("search", "--all-items")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.splitlines()[0], "62UPL4XJ\tnote\t\t\tFirst line")
+
     def test_search_pages_past_100(self):
-        def page(q):
+        def page(q, _body):
             start = int(q.get("start", ["0"])[0])
             limit = int(q["limit"][0])
             n = min(limit, 150 - start)
@@ -369,6 +400,271 @@ class ZoteroCliTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.query_for(LIB + "/searches")["limit"], ["3"])
         self.assertEqual(r.stdout.strip(), "[]")
+
+    # ---------------------------------------------------------------- writes
+
+    def auth_file(self):
+        return os.path.join(self.config.name, "zotero-local", "auth.json")
+
+    def setup_write(self, key="K" * 32):
+        """Serve a server ID on /api/ and store a write key for it."""
+        self.server.route("/api/", "Nothing to see here.", headers={"Zotero-Server-ID": "SRV1"}, content_type="text/plain")
+        if key:
+            os.makedirs(os.path.dirname(self.auth_file()), exist_ok=True)
+            with open(self.auth_file(), "w") as f:
+                json.dump({"SRV1": {"key": key, "remember": True}}, f)
+
+    def writes(self):
+        return [r for r in self.server.log if r["method"] != "GET"]
+
+    def report(self, key="NEWNOTE1"):
+        return {"successful": {"0": {"key": key}}, "success": {"0": key}, "unchanged": {}, "failed": {}}
+
+    def test_authorize_stores_key_per_server(self):
+        self.setup_write(key=None)
+        self.server.route("/api/local/authorize", {"key": "A" * 32, "remember": True}, method="POST")
+        r = self.run_cli("authorize", "--app-name", "Test App")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Always Allow", r.stderr)
+        (req,) = self.writes()
+        self.assertEqual(req["path"], "/api/local/authorize")
+        self.assertEqual(req["headers"]["zotero-server-id"], "SRV1")
+        self.assertEqual(req["body"], {"appName": "Test App"})
+        with open(self.auth_file()) as f:
+            self.assertEqual(json.load(f)["SRV1"]["key"], "A" * 32)
+        self.assertEqual(stat.S_IMODE(os.stat(self.auth_file()).st_mode), 0o600)
+
+    def test_authorize_single_use_warns(self):
+        self.setup_write(key=None)
+        self.server.route("/api/local/authorize", {"key": "A" * 32, "remember": False}, method="POST")
+        r = self.run_cli("authorize")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("single-use", r.stderr)
+
+    def test_authorize_denied(self):
+        self.setup_write(key=None)
+        self.server.route("/api/local/authorize", {"denied": True}, status=403, method="POST")
+        r = self.run_cli("authorize")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("denied", r.stderr)
+        self.assertFalse(os.path.exists(self.auth_file()))
+
+    def test_write_needs_server_id(self):
+        self.server.route("/api/", "Nothing to see here.", content_type="text/plain")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Zotero 10", r.stderr)
+        self.assertEqual(self.writes(), [])
+
+    def test_write_without_key(self):
+        self.setup_write(key=None)
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("authorize", r.stderr)
+        self.assertEqual(self.writes(), [])
+
+    def test_write_rejected_key(self):
+        self.setup_write()
+        self.server.route(LIB + "/items", "Invalid or expired API key", status=401, content_type="text/plain", method="POST")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("authorize", r.stderr)
+
+    def test_env_key_overrides_stored_key(self):
+        self.setup_write()
+        self.server.route(LIB + "/items", self.report(), method="POST")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x", env_extra={"ZOTERO_LOCAL_API_KEY": "E" * 32})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes()[0]["headers"]["zotero-api-key"], "E" * 32)
+
+    def test_add_note_to_parent(self):
+        self.setup_write()
+        self.server.route(LIB + "/items", self.report(), method="POST")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "a & b\nline2\n\nc", "--tag", "t1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        (req,) = self.writes()
+        self.assertEqual(req["path"], LIB + "/items")
+        self.assertEqual(req["headers"]["zotero-server-id"], "SRV1")
+        self.assertEqual(req["headers"]["zotero-api-key"], "K" * 32)
+        self.assertEqual(req["headers"]["zotero-allowed-request"], "1")
+        self.assertEqual(
+            req["body"],
+            [{"itemType": "note", "note": "<p>a &amp; b<br>line2</p>\n<p>c</p>", "parentItem": "K8ZP2VAD", "tags": [{"tag": "t1"}]}],
+        )
+        self.assertEqual(r.stdout.strip(), "created\tNEWNOTE1")
+
+    def test_add_standalone_note_html_in_collection(self):
+        self.setup_write()
+        self.server.route(LIB + "/items", self.report(), method="POST")
+        r = self.run_cli("add-note", "--html", "<h1>T</h1>", "--collection", "R5MINMKC")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes()[0]["body"], [{"itemType": "note", "note": "<h1>T</h1>", "collections": ["R5MINMKC"]}])
+
+    def test_add_note_from_file(self):
+        self.setup_write()
+        self.server.route(LIB + "/items", self.report(), method="POST")
+        path = os.path.join(self.config.name, "n.md")
+        with open(path, "w") as f:
+            f.write("<x>")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--file", path)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes()[0]["body"][0]["note"], "<p>&lt;x&gt;</p>")
+
+    def test_add_child_note_rejects_collection(self):
+        self.setup_write()
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x", "--collection", "R5MINMKC")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.server.log, [])
+
+    def test_write_report_failure(self):
+        self.setup_write()
+        failed = {"successful": {}, "success": {}, "unchanged": {}, "failed": {"0": {"key": "", "code": 400, "message": "Parent item X not found"}}}
+        self.server.route(LIB + "/items", failed, method="POST")
+        r = self.run_cli("add-note", "K8ZP2VAD", "--text", "x")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Parent item X not found", r.stderr)
+
+    def note_entry(self, version=7):
+        entry = json.loads(json.dumps(NOTE))
+        entry["data"]["version"] = version
+        return entry
+
+    def test_edit_note_append(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/62UPL4XJ", self.note_entry())
+        self.server.route(LIB + "/items/62UPL4XJ", "", status=204, method="PATCH")
+        r = self.run_cli("edit-note", "62UPL4XJ", "--append", "--text", "more")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        (req,) = self.writes()
+        self.assertEqual(req["body"], {"note": NOTE["data"]["note"] + "<p>more</p>", "version": 7})
+        self.assertEqual(r.stdout.strip(), "updated\t62UPL4XJ")
+
+    def test_edit_note_replace_rejects_non_note(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", PARENT)
+        r = self.run_cli("edit-note", "K8ZP2VAD", "--html", "<p>x</p>")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a note", r.stderr)
+        self.assertEqual(self.writes(), [])
+
+    def parent_entry(self, version=5):
+        entry = json.loads(json.dumps(PARENT))
+        entry["data"]["version"] = version
+        entry["data"]["tags"] = [{"tag": "keep", "type": 1}, {"tag": "old"}]
+        return entry
+
+    def test_tag_add_remove(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        self.server.route(LIB + "/items/K8ZP2VAD", "", status=204, method="PATCH")
+        r = self.run_cli("tag", "K8ZP2VAD", "--add", "new", "--remove", "old")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes()[0]["body"], {"tags": [{"tag": "keep", "type": 1}, {"tag": "new"}], "version": 5})
+
+    def test_tag_unchanged_skips_patch(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        r = self.run_cli("tag", "K8ZP2VAD", "--add", "keep", "--remove", "absent")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(r.stdout.strip(), "unchanged\tK8ZP2VAD")
+
+    def route_collection(self, key="AAAAAAAA"):
+        self.server.route(LIB + "/collections/" + key, {"key": key, "data": {"key": key, "name": "C"}})
+
+    def test_collect_add_and_remove(self):
+        self.setup_write()
+        self.route_collection()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        self.server.route(LIB + "/items/K8ZP2VAD", "", status=204, method="PATCH")
+        r = self.run_cli("collect", "K8ZP2VAD", "--add", "AAAAAAAA")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.run_cli("collect", "K8ZP2VAD", "--remove", "R5MINMKC")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        bodies = [w["body"] for w in self.writes()]
+        self.assertEqual(bodies, [{"collections": ["R5MINMKC", "AAAAAAAA"], "version": 5}, {"collections": [], "version": 5}])
+
+    def test_collect_rejects_child_item(self):
+        self.setup_write()
+        self.route_collection()
+        self.server.route(LIB + "/items/62UPL4XJ", self.note_entry())
+        r = self.run_cli("collect", "62UPL4XJ", "--add", "AAAAAAAA")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("child", r.stderr)
+        self.assertEqual(self.writes(), [])
+
+    def test_create_collection(self):
+        self.setup_write()
+        self.server.route(LIB + "/collections", self.report("NEWCOLL1"), method="POST")
+        r = self.run_cli("create-collection", "Reading list", "--parent", "AAAAAAAA")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes()[0]["body"], [{"name": "Reading list", "parentCollection": "AAAAAAAA"}])
+        self.assertEqual(r.stdout.strip(), "created\tNEWCOLL1")
+
+    def test_update_fields(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        self.server.route("/api/itemTypeFields", [{"field": "title"}, {"field": "extra"}, {"field": "date"}])
+        self.server.route(LIB + "/items/K8ZP2VAD", "", status=204, method="PATCH")
+        r = self.run_cli("update", "K8ZP2VAD", "bogus=1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("bogus", r.stderr)
+        self.assertEqual(self.writes(), [])
+        r = self.run_cli("update", "K8ZP2VAD", "extra=Read: yes", "date=")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.query_for("/api/itemTypeFields")["itemType"], ["preprint"])
+        self.assertEqual(self.writes()[0]["body"], {"extra": "Read: yes", "date": "", "version": 5})
+
+    def test_trash_and_restore(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        self.server.route(LIB + "/items/K8ZP2VAD", "", status=204, method="PATCH")
+        r = self.run_cli("trash", "K8ZP2VAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "trashed\tK8ZP2VAD")
+        trashed = self.parent_entry()
+        trashed["data"]["deleted"] = True
+        self.server.route(LIB + "/items/K8ZP2VAD", trashed)
+        r = self.run_cli("restore", "K8ZP2VAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        bodies = [w["body"] for w in self.writes()]
+        self.assertEqual(bodies, [{"deleted": True, "version": 5}, {"deleted": False, "version": 5}])
+        self.assertTrue(all(w["method"] == "PATCH" for w in self.writes()))
+
+    def test_restore_untrashed_is_noop(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        r = self.run_cli("restore", "K8ZP2VAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(r.stdout.strip(), "unchanged\tK8ZP2VAD")
+
+    def test_dry_run_sends_no_write(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        r = self.run_cli("--dry-run", "trash", "K8ZP2VAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.writes(), [])
+        self.assertIn("DRY RUN: PATCH " + LIB + "/items/K8ZP2VAD", r.stdout)
+        self.assertIn('"deleted": true', r.stdout)
+
+    def test_version_conflict(self):
+        self.setup_write()
+        self.server.route(LIB + "/items/K8ZP2VAD", self.parent_entry())
+        self.server.route(LIB + "/items/K8ZP2VAD", "item version mismatch", status=412, content_type="text/plain", method="PATCH")
+        r = self.run_cli("trash", "K8ZP2VAD")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("changed in Zotero", r.stderr)
+
+    def test_ping_reports_write_status(self):
+        self.setup_write(key=None)
+        self.server.route(LIB + "/items/top", [], headers={"Total-Results": "1"})
+        r = self.run_cli("ping")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("not authorized", r.stdout)
+        self.setup_write()
+        r = self.run_cli("ping")
+        self.assertIn("key stored", r.stdout)
 
 
 if __name__ == "__main__":

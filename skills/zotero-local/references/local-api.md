@@ -1,12 +1,12 @@
 # Zotero local API cheat sheet
 
-For `zotero.py raw PATH key=value ...`. The local API serves a read-only subset of [Zotero Web API v3](https://www.zotero.org/support/dev/web_api/v3/basics) from the running Zotero desktop app (Zotero 7+). Verified against Zotero 10.0.4.
+For `zotero.py raw PATH key=value ...`, and for understanding what the write commands send. The local API serves [Zotero Web API v3](https://www.zotero.org/support/dev/web_api/v3/basics) from the running Zotero desktop app: reads since Zotero 7, writes since Zotero 10. Verified against Zotero 10.0.4 (`server_localAPI.js` in the app's `omni.ja`).
 
 ## Differences from the web API
 
 - Base URL `http://127.0.0.1:23119/api/`. No API key.
 - "My Library" is `users/0` (the real user ID also works). Group libraries: `groups/<groupID>`; list them with `users/0/groups`.
-- Read-only: `POST`/`PUT`/`PATCH`/`DELETE` are refused (HTTP 428).
+- Writes need a local API key from `POST /api/local/authorize` (see [Writes](#writes)); reads need none.
 - `items/<attKey>/file` redirects (302) to a `file://` URL, and `items/<attKey>/file/view/url` returns that URL as text. Attachment JSON carries it in `links.enclosure.href`.
 - `items/<attKey>/fulltext` returns `{"content", "indexedPages", "totalPages"}` (or `indexedChars`/`totalChars`); 404 if not indexed.
 - `items?itemKey=A,B` also returns the items' child notes and attachments. `items/top?itemKey=A,B` returns only A and B.
@@ -34,6 +34,41 @@ For `zotero.py raw PATH key=value ...`. The local API serves a read-only subset 
 | `searches/<key>/items` | Items matching a saved search |
 | `tags` | All tags in the library |
 | `fulltext?since=<version>` | `{attKey: version}` of attachments with indexed text |
+
+## Writes
+
+Every `POST`/`PUT`/`PATCH`/`DELETE` needs:
+- `Zotero-Server-ID: <id>`, copied from the `Zotero-Server-ID` header of any response. Missing → 428; another instance's ID → 412.
+- `Zotero-API-Key: <key>` (or `?key=`, or `Authorization: Bearer <key>`). Missing, unknown or already-consumed → 401.
+- `Content-Type: application/json` for JSON bodies.
+
+The `zotero.py` write commands also send `Zotero-Allowed-Request: 1`, as Zotero's own test suite does.
+
+**Authorize:** `POST /api/local/authorize` with body `{"appName": "<name>"}` and the `Zotero-Server-ID` header opens a modal in Zotero. The request blocks until the user clicks:
+- **Always Allow** → 200 `{"key": "<32 chars>", "remember": true}`.
+- **Allow** → the same with `"remember": false`; the first successful write consumes the key.
+- **Deny** → 403 `{"denied": true}`.
+- More than 5 requests per minute → 429 with `Retry-After`.
+
+Keys live in `<Zotero profile>/localAPIKeys.json`; the user can clear them in Zotero → Settings → Advanced.
+
+**Endpoints and semantics:**
+
+| Request | Effect |
+|---|---|
+| `POST items`, `POST collections`, `POST searches` | JSON array of up to 50 new objects (or keyed objects to update). Always HTTP 200 with a write report: `{"successful": {"0": obj}, "success": {"0": key}, "unchanged": {}, "failed": {"0": {"key", "code", "message"}}}`. Check `failed`. |
+| `PATCH items/<key>` (also collections, searches) | Merges top-level fields onto the object. Arrays (`tags`, `collections`, `creators`) are replaced whole. 204. |
+| `PUT items/<key>` | Replaces the whole object. 204. |
+| `DELETE items/<key>`, `DELETE items?itemKey=A,B` | **Erases permanently**, bypassing the trash. `zotero.py` never does this; it PATCHes `{"deleted": true}` instead, which moves the item to the trash. |
+| `DELETE tags?tag=A \|\| B` | Removes tags from every item. Needs `If-Unmodified-Since-Version` with the library version. |
+| `PUT items/<attKey>/fulltext`, `POST fulltext` | Sets indexed full text. |
+| `POST items/<attKey>/file` → `POST local/uploads/<uploadKey>` → `POST items/<attKey>/file` with `upload=<uploadKey>` | Uploads a file into an existing imported-file attachment (form-encoded `md5`, `filename`, `filesize`, `mtime` in ms; `If-None-Match: *` for a new file). |
+
+**Concurrency:** writes to an existing object need its version, either as `"version": <n>` in the JSON (from `data.version` of a GET) or as the `If-Unmodified-Since-Version` header. A stale version → 412. Local versions are unrelated to web API versions.
+
+**Validation:** objects are applied with `fromJSON(json, {strict: false})`, so an unknown field may be dropped without an error. Check field names against `GET /api/itemTypeFields?itemType=<type>` first (`zotero.py update` does).
+
+Item types and fields: `GET /api/itemTypes`, `/api/itemTypeFields?itemType=<type>`, `/api/itemTypeCreatorTypes?itemType=<type>`, `/api/creatorFields`, `/api/schema`.
 
 ## Query parameters
 
