@@ -1,13 +1,13 @@
 ---
 name: zotero-local
-description: Search and read the user's local Zotero library through the Zotero local HTTP API (127.0.0.1:23119) — find papers by title, author, tag, collection or full text; read metadata, abstracts, notes and indexed PDF text; get local PDF file paths; export BibTeX/RIS/CSL-JSON; format citations. Use whenever the user mentions Zotero, "my library", "my papers", "my references", asks what they have saved on a topic, wants a citation or BibTeX entry for a paper they own, or wants to read or summarize a paper from their Zotero collection.
+description: Search, read and edit the user's local Zotero library through the Zotero local HTTP API (127.0.0.1:23119) — find papers by title, author, tag, collection or full text; read metadata, abstracts, notes and indexed PDF text; get local PDF file paths; export BibTeX/RIS/CSL-JSON; format citations; and (Zotero 10+) add or edit notes, tag items, file them into collections, create collections, fix metadata fields, and move items to the trash. Use whenever the user mentions Zotero, "my library", "my papers", "my references", asks what they have saved on a topic, wants a citation or BibTeX entry for a paper they own, wants to read or summarize a paper from their Zotero collection, or wants a note, tag or collection change saved back to Zotero.
 ---
 
 ## When to use me
 
-The user wants something out of **their own Zotero library**: find a paper, list what they saved on a topic or in a collection, read its abstract, notes or full text, get the PDF path, export BibTeX, or format a citation.
+The user wants something out of **their own Zotero library**: find a paper, list what they saved on a topic or in a collection, read its abstract, notes or full text, get the PDF path, export BibTeX, or format a citation. Or they want a change saved back: a note on a paper, tags, collection membership, a corrected field, an item moved to the trash (see [Writing](#writing)).
 
-Read-only. The local API refuses writes, so this skill cannot add items, edit tags or create notes. Not for searching the web for papers the user has not saved.
+Cannot add new papers or attach files. Not for searching the web for papers the user has not saved.
 
 ## Bundled script
 
@@ -25,7 +25,7 @@ zotero() { python3 "$SKILL_DIR/scripts/zotero.py" "$@"; }
 
 ## Commands
 
-Global options go **before** the command: `--json` (structured output), `--library group:<id>` (a group library instead of "My Library"; list groups with `zotero raw users/0/groups`), `--base-url` (default `$ZOTERO_LOCAL_URL` or `http://127.0.0.1:23119`).
+Read commands below; write commands under [Writing](#writing). Global options go **before** the command: `--json` (structured output), `--dry-run` (print write requests instead of sending them), `--library group:<id>` (a group library instead of "My Library"; list groups with `zotero raw users/0/groups`), `--base-url` (default `$ZOTERO_LOCAL_URL` or `http://127.0.0.1:23119`).
 
 | Command | Output |
 |---|---|
@@ -60,6 +60,31 @@ Item keys are 8 characters, `A-Z0-9` (e.g. `K8ZP2VAD`); every command that takes
 
 **"What did I note about P?"** → `notes KEY`.
 
+## Writing
+
+Needs Zotero 10 or later (`ping` prints `write: not supported` on older versions).
+
+**Authorize once.** If `ping` prints `write: not authorized`, or a write exits with code 3, run `zotero authorize`. Tell the user to click **Always Allow** in the Zotero window that pops up; the command waits up to 5 minutes for the click. "Allow" gives a single-use key that the next write consumes. The key is stored per Zotero instance in `~/.config/zotero-local/auth.json` (mode 600). The user can revoke it in Zotero → Settings → Advanced.
+
+| Command | Effect |
+|---|---|
+| `add-note [KEY] (--text T \| --html H \| --file PATH) [--tag T]... [--collection C]...` | Creates a child note under `KEY`, or a standalone note if `KEY` is omitted (`--collection` only for standalone). Prints `created  <noteKey>`. |
+| `edit-note NOTEKEY (--text \| --html \| --file) [--append]` | Replaces the note's content, or appends to it. |
+| `tag KEY... [--add T]... [--remove T]...` | Adds/removes tags; other tags stay. |
+| `collect KEY... (--add C \| --remove C)` | Adds items to, or removes them from, collection `C` (top-level items only). |
+| `create-collection NAME [--parent C]` | Prints `created  <collectionKey>`. |
+| `update KEY field=value...` | Sets metadata fields (`field=` clears one). Field names are checked against the item type; the error lists the valid ones. |
+| `trash KEY...` / `restore KEY...` | Moves items to / out of Zotero's trash. Nothing is ever erased. |
+
+Each write prints `<action>  <key>` per item: `created`, `updated`, `unchanged` (nothing to change, nothing sent), `trashed`, `restored`.
+
+**Confirmation policy:**
+- Run directly when the user asked for the change: `add-note`, `edit-note --append`, `tag`, `collect`, `create-collection`.
+- Show the `--dry-run` output and get an explicit yes first for: `trash`, `update`, `edit-note` without `--append`, and any command touching more than 5 items.
+- After `trash`, say the items are in Zotero's trash and can be restored with `restore`; do not say they were deleted.
+
+**Note content:** `--text` turns blank-line-separated paragraphs into `<p>` and escapes `<`, `>`, `&`. For headings, lists, bold or links, write HTML (`<h1>`, `<ul><li>`, `<b>`, `<a href>`) and pass it with `--html`, or `--file note.html` for long notes. `--file -` reads stdin. Tell the user the new note's key.
+
 ## Troubleshooting
 
 | Message (stderr) | Cause | Fix |
@@ -69,3 +94,8 @@ Item keys are 8 characters, `A-Z0-9` (e.g. `K8ZP2VAD`); every command that takes
 | `has no local API; it needs Zotero 7 or later` | Zotero 6 or older | Ask the user to upgrade Zotero. |
 | `not found: item KEY` | Wrong key, or the item is in a group library | Re-run `search`, or add `--library group:<id>`. |
 | `no indexed full text` | PDF not indexed yet | Use `path KEY` and read the PDF. |
+| `no valid write key` (exit 3) | Not authorized, key revoked, or a single-use key already used | Run `authorize`; the user clicks **Always Allow**. |
+| `authorization denied` (exit 3) | User clicked Deny | Ask whether they want to allow writes; do not retry unasked. |
+| `writing needs Zotero 10 or later` | Zotero 7–9 | Writes are unavailable; reads still work. |
+| `changed in Zotero since it was read` | The item was edited between the read and the write | Re-run the same command. |
+| `library ... is read-only for you` | Group library without edit rights | Nothing to fix from here. |
