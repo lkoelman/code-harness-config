@@ -180,6 +180,7 @@ Skill collections worth borrowing from — install them alongside this repo's, o
 - [ykdojo/claude-code-tips](https://github.com/ykdojo/claude-code-tips) - tips akd skills for getting the most out of claude code
 - [sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline) - Claude statusline customizer with Cache hot/cold timer
 - [Cursor pstack skills](https://github.com/cursor/plugins/tree/main/pstack) - useful skill collection for power devs
+- [Dr. Claw research skills](https://github.com/OpenLAIR/dr-claw/tree/main/skills)
 - Complendium of claudisms and unslop instructions
   - https://github.com/programasweights/claudish/blob/main/specs/claudish-to-english.md
   - https://claudisms.ai/
